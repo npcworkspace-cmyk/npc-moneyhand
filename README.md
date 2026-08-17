@@ -1,5 +1,7 @@
 # npc-moneyhand（抓钱手）
 
+[简体中文](./README.md) | [English](./README_EN.md)
+
 > **The universal browser action companion for the Agent era.**
 >
 > 给每个 AI Agent 一双稳定、快速、可编排、可定制的浏览器之手。
