@@ -1,238 +1,252 @@
-# npc-moneyhand
+# npc-moneyhand（抓钱手）
 
-`npc-moneyhand` 是给 AI Agent 使用的 Chrome 工具手。对外交付只有两部分：
+> **The universal browser action companion for the Agent era.**
+>
+> 给每个 AI Agent 一双稳定、快速、可编排、可定制的浏览器之手。
 
-- `extension/`：WS-only、零外部依赖的 Chrome MV3 扩展；
-- `skills/npc-moneyhand/`：自包含的 Agent Skill，内置 `moneyhand` 控制台、连接管理、语义动作、Task Space、拟人行为入口、恢复和自适应限流控制器。
+`npc-moneyhand`（中文名：**抓钱手**）是一个开源、local-first 的 **AI Agent browser automation** 基座，由零依赖 Chrome Extension 与可移植 Agent Skill 组成。它通过 WebSocket 和 Chrome DevTools Protocol（CDP）让 Codex、Claude Code、OpenClaw、Hermes 等本地 Agent 连接用户正在使用的 Chromium 浏览器，在保留真实 Profile、登录状态和页面环境的前提下完成可靠的 web automation、browser control 与 computer use。
 
-当前版本：`1.0.0`。
+抓钱手不是某个网站的爬虫，也不是一套写死的自动化流程。它提供通用浏览器行动能力：**底层执行保持稳定，上层任务通过 Skill 按需定义。**
 
-扩展负责确定性执行，Skill 负责 Agent 侧控制。没有独立常驻服务，没有桌面控制产品，也不要求另装一个控制器产品。
+当浏览器成为 Agent 连接真实世界的主要入口，抓钱手就是适合长期常驻的那双手。
+
+当前版本：`1.0.0` · [GitHub Releases](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases) · [MIT License](./LICENSE)
+
+## 为什么值得安装
+
+普通 Agent 每次接管浏览器时，往往都要重新发现连接方式、理解页面、生成临时控制脚本，再把大量页面内容送回模型逐步判断。这不仅慢，也会重复消耗 Token，并把一次任务变成一串脆弱的单步操作。
+
+抓钱手把这些重复工作沉淀成一个可复用的基础能力：
+
+- **一次接入，长期复用**：Agent 不必为每个任务重写 WebSocket 控制器、会话路由和生命周期代码；
+- **使用真实浏览器状态**：直接连接用户当前的 Chromium Profile、标签页和登录环境，不额外制造一套浏览器；
+- **默认追求最快路径**：优先使用结构化页面信息、原始 CDP 和批量动作，不默认截图，也不默认加入人为等待；
+- **复杂任务可以固化**：把反复执行的规则、字段、批次、检查点和完成标准写成专属 Skill，形成稳定的批量行动助手；
+- **异常不会被隐藏**：断线、超时和结果未知是明确状态，必须检查真实页面后再决定是否继续，避免盲目重放；
+- **本地、轻量、可迁移**：Extension 与 Skill 都是零外部运行时依赖，不安装 daemon、系统服务、Native Host 或远程控制后端；
+- **Agent 不被平台绑定**：只要宿主能在本机读取 Skill、运行 Node.js 20+ 并持有控制器，就能通过同一机器契约接入。
+
+如果你的 Agent 只偶尔打开一个静态网页，抓钱手不是必需品；如果它需要持续浏览、操作、整理、核对或批量完成网页任务，抓钱手会从临时工具变成基础设施。
+
+## 三层思路：一套基座，无数专属行动助手
+
+抓钱手把“会思考”和“能稳定执行”拆开，并把创新集中在最适合变化的 Skill 层。
+
+~~~text
+你的 Agent
+    │ 目标、判断、异常决策
+    ▼
+③ 专属 Skill：定义领域流程与批量行动
+    │ 调用稳定、公开的通用能力
+    ▼
+② npc-moneyhand Skill：连接、会话、语义动作、批处理、恢复与节流
+    │ npc-moneyhand/2 · loopback WebSocket
+    ▼
+① MoneyHand Extension：在真实 Chromium 页面中确定性执行
+    │ CDP / CDP Input / allowlisted Chrome APIs
+    ▼
+用户当前的浏览器 Profile
+~~~
+
+### 第一层：Extension 是稳定的“手”
+
+Extension 只负责确定性执行：连接、目标路由、CDP、输入、受限 Chrome API、有界页面观察和显式截图。它不内置业务规则、不调用模型、不保存任务数据库，也不猜 Agent 的意图。
+
+这层越薄，越容易保持稳定、快速和可审计。它是 WebSocket client，只主动连接本机 loopback listener；不暴露公网服务，也不依赖外部包。
+
+### 第二层：MoneyHand Skill 是通用“动作系统”
+
+基础 Skill 把所有 Agent 都会重复需要的能力封装一次：
+
+- 首次预检和 Extension 发现；
+- controller 生命周期与 Profile 会话选择；
+- Task Space 对多步任务的精确绑定；
+- 结构化观察、语义定位、受守卫动作和批处理；
+- `raw` / `human` 行为切换与自动复位；
+- 审批、结果未知恢复、checkpoint 和自适应 rate control；
+- ESM、JSONL、CLI 和可信本地任务模块入口。
+
+Agent 不需要每次重新发明这些基础设施，只需要读取 Skill 的能力契约并调用它。
+
+### 第三层：专属 Skill 是你的“批量行动助手”
+
+真正与业务、网站或个人工作方式有关的知识，放在独立的专属 Skill 中：目标范围、页面规则、字段、步骤、批次、去重、完成证明、输出格式和平台信号，都由这一层定义。
+
+一个专属 Skill 可以只有 `SKILL.md` 和 references；当任务需要确定性循环、解析或大批量执行时，再增加少量脚本。它复用同一个 MoneyHand controller，不复制 Extension、WebSocket Peer 或底层协议。
+
+我们鼓励社区优先在这一层创新：**不要为每种任务再造一个浏览器插件，而是在同一个通用基座上，定义自己的行动助手。** 专属 Skill 可以独立分发、独立迭代、相互组合，也不会让 MoneyHand 核心随业务变化不断膨胀。
+
+## 创新点不只是“让 Agent 点网页”
+
+### 1. 执行层与智能层真正解耦
+
+Agent 负责理解目标和处理例外，Extension 负责确定性动作，基础 Skill 负责把两者连接成稳定的控制面。模型、网站规则和浏览器执行不再揉成一段不可复用的临时代码。
+
+### 2. 从一次性脚本升级为可组合能力
+
+抓钱手提供稳定的 operation catalog、结果 envelope 和生命周期。专属 Skill 只依赖公开能力，因此可以替换、叠加和版本化，而不需要修改 Extension。
+
+### 3. 为 Agent 设计的 Token 经济性
+
+抓钱手通过架构减少重复推理，而不是单纯压缩提示词：
+
+| 容易浪费 Token 的做法 | 抓钱手的做法 |
+| --- | --- |
+| 每次生成一套连接器和控制脚本 | 基础 Skill 提供固定 controller 与机器契约 |
+| 反复把整页 HTML 或截图送给模型 | 优先返回有界结构化文本、控件和语义快照 |
+| 每个点击都经过一轮模型往返 | 原始 CDP、`batch.run` 和确定性任务模块批量执行 |
+| 每次重新理解同一种流程 | 专属 Skill 一次定义范围、步骤、字段和完成标准 |
+| 任务中途反复寻找标签页和 Profile | Task Space 固定当前任务的浏览器身份和目标 |
+| 超时后让模型猜测并重试 | `OUTCOME_UNKNOWN` 保留证据，先核查真实状态 |
+
+模型因此可以把 Token 用在目标理解、判断和异常处理上，而不是重复描述鼠标应该移动到哪里、下一步应该怎样执行、同一种记录应该怎样整理。
+
+### 4. 快速模式与拟人模式是策略，不是两套产品
+
+默认使用 `raw`：结构化响应、CDP、DOM 和批量动作优先，适合高频读取与确定性操作。只有 Agent 或专属 Skill 明确要求时才临时启用 `human`，调整鼠标轨迹、输入节奏、滚动和停顿，并在阶段结束后恢复默认。
+
+拟人模式不会绕过 CAPTCHA、账号控制或网站限制，也不会自动获得更高权限。
+
+### 5. 把限流与不确定性作为一等状态
+
+批量行动不是盲目加速。专属 Skill 可以把状态码、`Retry-After`、延迟、挑战和账号状态信号交给共享 rate controller，由它给出并发、间隔、等待、cooldown 或停止决策。结果未知时则保留现场，不自动重放可能已经生效的动作。
+
+### 6. 同一基座服务不同 Agent
+
+抓钱手的正式入口是文件、CLI、ESM 和 UTF-8 JSONL，而不是绑定某一家模型 SDK。Agent 宿主只要具备本地文件与进程能力，就可以读取同一 Skill、检查同一 descriptor、运行同一 controller。
+
+## 通用浏览器能力
+
+抓钱手面向 Chromium 网页目标提供：
+
+- 标签页、窗口、Frame、OOPIF 和会话管理；
+- 导航、等待、刷新、前进后退和页面状态检查；
+- DOM、可见文本、控件、语义快照和网络响应观察；
+- 点击、输入、按键、滚动、选择、勾选、拖拽、文件上传与下载；
+- 原始 CDP、CDP Input、受限 Chrome API 和最多 200 步的单标签批处理；
+- 多 Profile 连接、最近焦点路由和多步任务固定；
+- Agent 显式选择的拟人行为、截图兜底和人类接管边界；
+- 高影响动作审批、活动记录、恢复、节流与 checkpoint。
+
+浏览器工具栏、原生保存/打印窗口、系统认证、桌面软件和 CAPTCHA 不属于网页执行面，需要交给人或独立桌面能力。抓钱手不把“浏览器技术上可见”解释为数据授权。
 
 ## 五分钟开始
 
-要求：
+要求：桌面 Chromium 125+；基础 Skill 需要 Node.js 20+；Extension 与 Agent 在同一台电脑上运行。不需要 `npm install`。
 
-- 桌面 Chrome/Chromium 125+；
-- 使用官方 Skill 时需要 Node.js 20+；
-- Extension 与 Skill 在同一台电脑上通过 loopback 通信；
-- 不需要 `npm install`。
+### 1. 安装 Extension
 
-直接克隆仓库：
+从 [GitHub Releases](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases) 下载独立的 `npc-moneyhand-extension-1.0.0.zip`，解压后：
 
-~~~powershell
-git clone https://github.com/npcworkspace-cmyk/npc-moneyhand.git
-cd .\npc-moneyhand
-~~~
+1. 打开浏览器扩展管理页并启用开发者模式；
+2. 选择“加载已解压的扩展程序”；
+3. 打开扩展弹窗，确认 `127.0.0.1:19846` 并保存一次；
+4. 保持浏览器和 Extension 启用，之后 Agent listener 启动时会自动重连。
 
-在每个需要交给 Agent 的 Chrome Profile 中：
+Extension 适用于支持开发者模式和 Chromium Extension API 的浏览器；具体兼容性仍以目标浏览器的实际验收为准。
 
-1. 打开 `chrome://extensions`，启用开发者模式；
-2. “加载已解压的扩展程序”，选择仓库的 `extension` 目录；
-3. 打开扩展弹窗，确认 `127.0.0.1:19846`，点击一次“保存”；
-4. 保持 Chrome 和扩展启用。以后 Agent listener 启动时扩展会自动重连。
+### 2. 把 Skill 交给 Agent
 
-安装 Skill 到默认 Agent Skills 目录：
+可以从 Release 获取独立 Skill 包，也可以克隆仓库后安装到 Agent 的 Skills 目录：
 
 ~~~text
+git clone https://github.com/npcworkspace-cmyk/npc-moneyhand.git
+cd npc-moneyhand
 npm run skill:install
 ~~~
 
-仓库开发时可使用会随源码更新的链接：
-
-~~~text
-npm run skill:link
-~~~
-
-其他支持 Skills 的 Agent 可指定自己的目录：
+其他 Agent 可指定自己的 Skills 路径：
 
 ~~~text
 node scripts/install-skill.mjs --mode copy --target "<agent-skills-directory>"
 ~~~
 
-要交付一个不依赖仓库、不需要 `npm install` 的便携包：
+Skill 包不包含 Extension 源码或安装目录；如果预检没有发现 Extension，Agent 应引导用户从 Releases 下载 Extension ZIP，而不是修改浏览器或偷偷联网安装。
+
+### 3. 预检并启动
 
 ~~~text
-npm run skill:pack:portable
-~~~
-
-产物位于 `artifacts/portable-skill/`：一个以 `npc-moneyhand/` 为根的 ZIP，以及
-`portable-manifest.json` 和 `SHA256SUMS.txt`。该 ZIP 只包含 Skill、控制器和插件完整性
-清单，**不包含 Extension 源码或安装目录**。在新电脑解压后，Agent 第一步必须从 Skill 目录运行
-`node scripts/preflight.mjs --json`；它只扫描有界的已知/显式 Chromium Profile 路径，
-不会启动浏览器、绑定端口或写 Profile。各 Agent 的原生目录与通用交接见
-[`agent-hosts.md`](./skills/npc-moneyhand/references/agent-hosts.md)。
-
-若预检没有找到匹配且启用的 Extension，让用户前往
-[GitHub Releases](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases) 下载独立的
-`npc-moneyhand-extension-1.0.0.zip`，解压后从浏览器扩展页人工加载。Skill 不会自动下载、
-解压、写入 Profile 或修改浏览器策略；Skill 与 Extension 可以分别升级和分发。
-
-从源码发现并启动控制台：
-
-~~~text
+node skills/npc-moneyhand/scripts/preflight.mjs --json
 node skills/npc-moneyhand/scripts/moneyhand.mjs --describe
 node skills/npc-moneyhand/scripts/moneyhand.mjs --host 127.0.0.1 --port 19846
 ~~~
 
-安装为可执行包后，正式 CLI 名称是 `moneyhand`：
+预检是只读扫描：它不会启动浏览器、绑定端口、修改 Profile 或自动安装 Extension。仅仅让 Agent 读到 `SKILL.md` 也不会隐式执行程序；Agent 必须根据 Skill 明确调用本地命令。
+
+不同 Agent 宿主的接入方式见 [Agent hosts](./skills/npc-moneyhand/references/agent-hosts.md)，完整生命周期见 [Agent 快速开始](./docs/AGENT_QUICKSTART.md)。
+
+## 创作你的专属 Skill
+
+推荐目录保持简单：
 
 ~~~text
-moneyhand --describe
-moneyhand --host 127.0.0.1 --port 19846
+my-action-skill/
+├─ SKILL.md          # 何时触发、目标范围、工作流和完成标准
+├─ references/       # 页面规则、字段、Schema 和平台约束（按需）
+├─ scripts/          # 确定性循环、解析和批量动作（按需）
+└─ assets/           # 输出模板（按需）
 ~~~
 
-启动成功先输出 `moneyhand.listening`；正常有限运行最终输出 `moneyhand.stopped`。完整启动和关闭顺序见 [Agent 快速开始](./docs/AGENT_QUICKSTART.md)。
+一个合格的专属 Skill 应先声明：
 
-## 运行关系
+- 允许操作的 origin、Profile / 账号边界和最大任务范围；
+- 输入、输出、字段、effects 和完成证明；
+- 需要的 MoneyHand operations 与 wire methods；
+- controller 由谁持有，以及 Task Space 如何绑定；
+- pilot、批次、rate scope、checkpoint 和停止条件；
+- incomplete、blocked 与 `OUTCOME_UNKNOWN` 如何诚实返回。
 
-~~~text
-专项 Skill（可选：Reddit 评论、红人开发、VOC……）
-                         │ 复用同一个任务期控制器
-                         ▼
-npc-moneyhand Skill
-  ├─ moneyhand CLI / ESM / JSONL / trusted task module
-  ├─ connection / Task Space / semantic action / approval
-  └─ pilot / backoff / cooldown / circuit
-                         │ npc-moneyhand/2
-                         ▼
-loopback WebSocket
-                         ▲ Extension 主动连接
-                         │
-npc-moneyhand Chrome Extension
-  ├─ raw CDP / CDP Input
-  ├─ allowlisted Chrome API
-  ├─ bounded text observation
-  └─ explicit screenshot
-                         ▼
-当前真实 Chrome Profile
-~~~
+专属 Skill 不应复制抓钱手控制器、另开 listener、硬编码用户 Profile、绕过审批或把业务逻辑塞进 Extension。完整创作边界、组合契约、打包要求和验收清单见 [Composing a specialized Skill with MoneyHand](./skills/npc-moneyhand/references/skill-composition.md)。
 
-每个 Agent 任务只能拥有一个 MoneyHand controller。任务内可以运行多个专项阶段或次抛任务模块；任务结束必须关闭 controller。项目不会安装 daemon、Windows 服务、launch agent、Native Host 或后台常驻控制器。
+## 产品边界
 
-扩展是 WebSocket client，Skill 是本机 listener。所谓“输入端口唤醒”是扩展发现已启动的 listener，不是 listener 启动 Chrome。Chrome 已关闭、扩展被禁用或电脑休眠时，仅启动端口不能唤醒浏览器。
-
-## 默认快，拟人模式显式开启
-
-默认行为是 `raw`：
-
-- 直接走结构化响应、CDP、DOM 或批量操作；
-- 不添加人为延迟；
-- 不自动截图；
-- 不自动重放结果未知的动作。
-
-只有 Agent 或上层专项 Skill 明确要求时才启用 `human`。它改变鼠标轨迹、输入节奏、滚动分段和停顿；应设置有限 TTL，并在 `finally` 中 `behavior.reset`。它不是验证码规避、账号伪装或绕过网站限制的机制。
-
-大批量任务可使用 Skill 内的自适应 rate controller，但它与 `human` 行为是两件事：
-
-1. 先用最小代表样本 pilot；
-2. 观察 429/503、`Retry-After`、节流载荷、持续 403、挑战页和延迟异常；
-3. 先降并发，再增加带 jitter 的间隔并进入 cooldown；
-4. 达到停止条件时打开 circuit，保存 checkpoint 并交回 Agent；
-5. 只在连续干净的小批次后逐步恢复，且不超过最后已知安全速率。
-
-这是显式调用方调度器，不会替普通 `request()` 猜测站点/Profile/账号 scope，也不会自动拦截
-未纳入调度的低层请求。Agent 或专项 Skill 必须在每个受控批次前读取 decision、遵守
-concurrency/interval/wait/stop，并在批次后回传观察。`human` 在同一个 decision 内不会放宽门槛。
-
-这只能降低冲击、识别限流并安全恢复，**不保证不触发限流，也不保证账号不会被平台限制**。挑战页、账号状态变化或最低并发下重复节流必须停止，不得靠拟人模式继续冲量。
-
-## 能力边界
-
-Extension wire `npc-moneyhand/2` 提供：
-
-| 类别 | 方法 |
-| --- | --- |
-| 状态与行为 | `system.status`、`behavior.get/set/reset` |
-| 目标 | `target.list/attach/detach/sessions` |
-| 原始浏览器能力 | `cdp.send` |
-| 受限 Chrome API | `chrome.call` |
-| 高频输入与批处理 | `input.perform`、`batch.run` |
-| 观察 | `observe.context`、`observe.screenshot` |
-| 事件与求助恢复 | `events.subscribe/unsubscribe`、`instruction.resolve` |
-
-Skill 控制面 `npc-moneyhand-control/1` 在 wire 之上增加：
-
-- ESM、UTF-8 JSONL、`--once` 和可信 `--task`；
-- 最近焦点 Profile 路由与精确 `instanceId + bootId` 固定；
-- Task Space、页面 transition、语义快照、稳定 locator 和短期 ref；
-- 下载、上传、select、check、drag 等受守卫动作；
-- 高影响操作的一次性审批和活动记录；
-- `OUTCOME_UNKNOWN` 检查后确认；
-- 自适应 rate controller；
-- 页面/浏览器外表面路由判断。
-
-页面正文、标题、URL 和控件文本都视为不可信内容。页面不明确时先返回有界文本给 Agent；只有文字不足且 Agent 明确要求时才截图。
-
-## 浏览器外表面
-
-MoneyHand 只控制网页目标：
-
-1. 结构化 DOM/CDP；
-2. 页面视觉 + CDP Input（canvas、地图、WebGL 等）；
-3. 浏览器工具栏、原生保存/打印窗口、权限弹窗、系统认证、桌面软件和 CAPTCHA 交给人。
-
-项目不再提供桌面自动化后端。`css-viewport-v1` 坐标只属于页面 viewport，不能直接用于系统窗口或屏幕坐标。
-
-## 叠加专项 Skill
-
-例如 `crawl-reddit-comments`、红人开发或 VOC Skill 可以复用 MoneyHand，但职责必须分开：
-
-- 专项 Skill：平台入口、字段、分页、去重、checkpoint、业务输出和平台特有限流信号；
-- MoneyHand Skill：唯一 controller、连接、行为、Task Space、通用动作、审批、恢复和 rate controller；
-- Extension：确定性浏览器执行。
-
-专项 Skill 不得复制 WebSocket Peer、另开同端口 listener、绕过审批/限流控制，或把平台业务逻辑塞进扩展。若需要动态任务代码，复制 `skills/npc-moneyhand/assets/disposable-task.mjs` 到任务目录；模块只导出任务逻辑，不拥有 controller 生命周期。
-
-创作专项 Skill 时还必须先声明站点/账号范围、最大任务边界、字段、effects、所需 operation、
-controller 归属、完成证明、rate scope 和输出；无法证明全量完成时必须返回有界的 incomplete，
-不能把部分数据包装成 complete。完整的“允许做什么、必须做什么、禁止做什么、如何打包与
-验收”见 [`skill-composition.md`](./skills/npc-moneyhand/references/skill-composition.md)。
-
-## 安全与网络边界
-
-- listener 只绑定 `127.0.0.1`、`localhost` 或 `::1`；IPv4 和 IPv6 是不同 listener；
-- Upgrade 只接受精确 `/extension`、匹配端口的 loopback Host/remote 和 Chrome Extension Origin；
-- 配对密钥只通过 `NPC_MONEYHAND_PAIRING_TOKEN` 传入，不写 argv、页面或日志；
-- 不导出 cookie/token，不绕过挑战，不把“CDP 看得到”解释成数据授权；
-- 付款、发布、发送、删除、上传等外部写入需要当前用户确认；
-- post-dispatch 超时、断线或 `OUTCOME_UNKNOWN` 必须先检查真实状态，禁止盲重试。
+- 只绑定 loopback 地址，不提供远程控制服务；
+- 不导出 cookie、authorization header、密码、配对密钥或 Profile 数据；
+- 不绕过 CAPTCHA、挑战、账号控制或网站限流；
+- 发布、发送、支付、删除、上传等高影响动作需要当前任务的精确授权；
+- 页面内容始终视为不可信输入，不能把网页文字升级为系统指令；
+- 真实 Profile、登录账号和目标网站必须单独验收，离线测试不代表线上任务已完成。
 
 ## 文档
 
-- [架构](./ARCHITECTURE.md)
+- [架构与三层职责](./ARCHITECTURE.md)
 - [Agent 快速开始](./docs/AGENT_QUICKSTART.md)
 - [Agent / CLI 接入](./docs/AGENT_INTEGRATION.md)
 - [兼容、升级与回滚](./docs/AGENT_COMPATIBILITY.md)
 - [故障处理](./docs/AGENT_TROUBLESHOOTING.md)
 - [Extension wire 协议](./docs/PROTOCOL.md)
 - [性能原则](./docs/PERFORMANCE.md)
-- [真实 Chrome 验收](./docs/REAL_CHROME_TEST.md)
-- [Git 工作流](./docs/GIT_WORKFLOW.md)
+- [真实 Chromium 验收](./docs/REAL_CHROME_TEST.md)
+- [专属 Skill 创作边界](./skills/npc-moneyhand/references/skill-composition.md)
 
-机器可读契约位于：
+机器可读能力位于：
 
 - `skills/npc-moneyhand/references/moneyhand-contract.json`；
 - `skills/npc-moneyhand/references/agent-operations.json`；
 - `skills/npc-moneyhand/references/extension-integrity.json`。
 
-## 验证
+## 参与项目
 
-本地零依赖门禁：
+我们欢迎两类贡献：
+
+1. 让抓钱手基座更稳定、更快、更可移植；
+2. 基于公开组合契约创作新的专属 Skill、模板和验收方法。
+
+核心原则是：通用能力进入基座，变化频繁的领域知识进入专属 Skill。让一个可靠的 Hand 支撑越来越多行动助手，而不是让每个任务都重新制造一只手。
+
+## 验证
 
 ~~~text
 npm run check
 ~~~
 
-真实 Chrome 是独立验收面：
+真实浏览器是独立验收面：
 
 ~~~text
 npm run smoke:chrome
 npm run e2e:chrome
 ~~~
 
-测试脚本通过不等于当前用户 Profile、登录账号或目标网站已经验收；交付结论必须分别说明本地门禁、打包门禁和真实 Profile 结果。
-
 ## License
 
-MIT
+[MIT](./LICENSE)

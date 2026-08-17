@@ -5,7 +5,7 @@
 ## 总体结构
 
 ~~~text
-Agent planning / platform-specific Skill
+Agent planning / custom action Skill
                  │
                  │ calls one task-owned controller
                  ▼
@@ -162,7 +162,7 @@ rate controller 是显式 caller scheduler，不是 `request()` 的透明拦截�
 
 ## 专项 Skill 组合
 
-专项 Skill（如 Reddit 评论、红人开发、VOC）拥有平台工作流、字段、分页、去重、checkpoint 和输出。它通过 MoneyHand 公开控制契约请求浏览器能力，但必须复用当前任务唯一 controller。
+专属 Skill 拥有目标领域的工作流、字段、批次、去重、checkpoint、完成证明和输出。它通过 MoneyHand 公开控制契约请求浏览器能力，但必须复用当前任务唯一 controller。
 
 禁止：
 

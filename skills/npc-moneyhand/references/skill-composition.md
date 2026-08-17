@@ -13,7 +13,7 @@ extension must never import, discover, or depend on a specialized Skill.
 - [Lifecycle and recovery](#lifecycle-and-recovery)
 - [Packaging boundary](#packaging-boundary)
 - [Acceptance checklist](#acceptance-checklist)
-- [Examples](#examples)
+- [Reusable patterns](#reusable-patterns)
 
 ## Layer ownership
 
@@ -92,10 +92,10 @@ machine-readable plan output. This is a planning declaration, not a new MoneyHan
     "wireMethods": ["observe.context"]
   },
   "scope": {
-    "origins": ["https://www.reddit.com"],
+    "origins": ["https://app.example.test"],
     "effects": ["read-only"],
     "maximumItems": 100,
-    "completion": "selected post IDs exhausted and all visible comment continuations resolved"
+    "completion": "declared item set exhausted and every continuation reaches a terminal state"
   },
   "controllerOwnership": "injected",
   "rateScope": ["origin", "profile", "account-if-known"],
@@ -183,16 +183,16 @@ Require all applicable checks before calling a specialized Skill portable or pro
 - A separate real-Profile acceptance verifies the visible workflow; offline fixtures do not prove it.
 - The final package contains no copied peer, extension, secrets, live checkpoints, or undeclared dependency.
 
-## Examples
+## Reusable patterns
 
-`crawl-reddit-comments` owns subreddit/keyword discovery, selected post IDs, comment-tree expansion,
-deduplication, exact completion evidence, Reddit throttle interpretation, and output records. It uses
-one MoneyHand Task Space/rate scope and does not own the peer or controller lifecycle.
+A read-oriented Skill owns discovery rules, exact item selection, continuation expansion,
+deduplication, completion evidence, source provenance, and output records. It uses one MoneyHand Task
+Space and rate scope without owning a second peer or controller lifecycle.
 
-An influencer-development Skill owns platform search criteria, qualification fields, deduplication,
-scoring, outreach candidate records, and CRM/export mapping. Profile visits are read-only; following,
-messaging, publishing, uploading, or writing to a CRM requires exact effect declarations and approval.
+An action-oriented Skill owns its target-selection rules, effect declarations, preconditions,
+verification, and recovery plan. Any send, publish, upload, delete, payment, or other external write
+requires exact current approval and must never be replayed blindly after an unknown outcome.
 
-A VOC Skill owns immutable raw records, normalization, claim extraction, taxonomy/label versions,
-sentiment, evidence links, storage, and reports. MoneyHand only supplies bounded browser acquisition;
-do not move LLM clients, databases, labeling, or reporting into MoneyHand or its extension.
+A monitoring Skill owns its schedule outside MoneyHand, its change-detection rules, local checkpoint,
+bounded observation fields, and alert output. Each run still creates or receives one task-owned
+controller, proves what was checked, and reports incomplete coverage honestly.

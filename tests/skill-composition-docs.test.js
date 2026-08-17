@@ -30,7 +30,7 @@ test("specialized Skill composition keeps one-way ownership and an explicit crea
     "## Lifecycle and recovery",
     "## Packaging boundary",
     "## Acceptance checklist",
-    "## Examples",
+    "## Reusable patterns",
   ]) {
     assert.ok(composition.includes(heading), `missing composition heading: ${heading}`);
   }
@@ -90,7 +90,7 @@ test("specialized Skill acceptance covers lifecycle, rate, approvals, exact scop
   ]) {
     assert.ok(composition.includes(evidence), `missing acceptance evidence: ${evidence}`);
   }
-  for (const example of ["crawl-reddit-comments", "influencer-development Skill", "A VOC Skill"]){
+  for (const example of ["A read-oriented Skill", "An action-oriented Skill", "A monitoring Skill"]) {
     assert.ok(composition.includes(example), `missing specialized Skill example: ${example}`);
   }
 });
