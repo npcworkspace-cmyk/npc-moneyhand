@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>npc-moneyhand</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>npc-moneyhand</h1>
+        <p id="status">正在读取状态…</p>
+      </header>
+
+      <form id="connection">
+        <div class="endpoint">
+          <label class="sr-only" for="address">本机地址</label>
+          <input id="address" aria-label="本机地址" autocomplete="off" spellcheck="false" value="127.0.0.1">
+          <span class="separator">:</span>
+          <label class="sr-only" for="port">端口</label>
+          <input id="port" aria-label="端口" type="number" min="1" max="65535" inputmode="numeric" value="19846">
+          <button id="save" type="submit">保存</button>
+        </div>
+      </form>
+    </main>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+# Generated or local-only files
+node_modules/
+coverage/
+test-results/
+artifacts/
+downloads/
+*.log
+*.pid
+
+# Local secrets and editor state
+.env
+.env.*
+*.local.json
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

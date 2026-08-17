@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>MoneyHand checkable acceptance</title>
+<style>
+  body { font: 16px system-ui; padding: 40px; }
+  label, button { display: block; margin: 24px; padding: 16px; }
+</style>
+<label><input id="native" type="checkbox"> Native consent</label>
+<button id="aria" type="button" role="switch" aria-checked="false">ARIA alerts</button>
+<output id="state"></output>
+<script>
+  const native = document.querySelector("#native");
+  const aria = document.querySelector("#aria");
+  const state = document.querySelector("#state");
+  globalThis.fixtureEvents = [];
+  const record = (event) => {
+    globalThis.fixtureEvents.push({
+      id: event.currentTarget.id,
+      type: event.type,
+      isTrusted: event.isTrusted,
+      checked: event.currentTarget.checked ?? null,
+      ariaChecked: event.currentTarget.getAttribute("aria-checked"),
+    });
+  };
+  for (const type of ["click", "input", "change"]) native.addEventListener(type, record);
+  aria.addEventListener("click", (event) => {
+    const next = aria.getAttribute("aria-checked") !== "true";
+    aria.setAttribute("aria-checked", String(next));
+    record(event);
+  });
+  const render = () => {
+    state.value = JSON.stringify({
+      native: native.checked,
+      aria: aria.getAttribute("aria-checked"),
+      events: globalThis.fixtureEvents,
+    });
+  };
+  document.addEventListener("click", render);
+  render();
+</script>
+</html>

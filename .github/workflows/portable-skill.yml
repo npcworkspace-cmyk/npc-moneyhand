@@ -1,0 +1,56 @@
+name: portable-skill
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: [20, 22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm run check
+      - uses: actions/setup-python@v7
+        if: matrix.node == 22
+        with:
+          python-version: "3.12"
+      - name: Pack, install and drive the MoneyHand Skill from Python
+        if: matrix.node == 22
+        run: npm run accept:agents:packaged
+      - name: Drive MoneyHand through the language-neutral JSONL profile
+        if: matrix.node == 22
+        run: >-
+          python scripts/agent-jsonl-conformance.py
+          -- node skills/npc-moneyhand/scripts/moneyhand.mjs --port 0
+
+  release-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build and conformance-test release artifacts
+        run: npm run release:pack
+      - name: Upload the complete unpacked release directory
+        uses: actions/upload-artifact@v7
+        with:
+          name: npc-moneyhand-release
+          path: artifacts/agent-release
+          if-no-files-found: error

@@ -1,0 +1,195 @@
+# npc-moneyhand 架构
+
+当前产品边界只有一个 Agent Skill 和一个 Chrome Extension。版本为 `1.0.0`。
+
+## 总体结构
+
+~~~text
+Agent planning / platform-specific Skill
+                 │
+                 │ calls one task-owned controller
+                 ▼
+skills/npc-moneyhand
+  ├─ SKILL.md
+  ├─ moneyhand CLI / ESM / JSONL / task modules
+  ├─ WebSocket Peer and Profile routing
+  ├─ Task Spaces and page transitions
+  ├─ semantic snapshots / locators / guarded actions
+  ├─ approvals / unknown-outcome recovery
+  └─ adaptive rate controller
+                 │ npc-moneyhand/2 over loopback WS
+                 ▼
+extension
+  ├─ protocol / correlation / heartbeat / reconnect
+  ├─ per-target queues / at-most-once guard
+  ├─ raw CDP / OOPIF sessions / CDP Input
+  ├─ allowlisted Chrome APIs
+  ├─ raw or Agent-selected human behavior
+  └─ bounded text / explicit screenshot
+                 │
+                 ▼
+Real Chrome Profile
+~~~
+
+规划和平台知识留在 Agent 或专项 Skill；确定性浏览器动作留在扩展。Skill 内置过去独立控制层的通用能力，但不把语义规划、数据存储、平台爬虫或模型 SDK 放进扩展。
+
+## 两个交付物
+
+| 路径 | 职责 | 运行依赖 |
+| --- | --- | --- |
+| `extension/` | Chrome 内的 WS client、协议验证、CDP/Input/Chrome API 执行、行为和状态图标 | Chrome 125+；零外部包 |
+| `skills/npc-moneyhand/` | Agent 控制台、WS listener、语义动作、Task Space、审批、恢复、限流器和组合契约 | Node.js 20+；零外部 runtime package |
+
+`moneyhand` 是唯一正式 CLI。Skill 的控制协议为 `npc-moneyhand-control/1`；Extension wire 为 `npc-moneyhand/2`。JSONL 正常生命周期事件为 `moneyhand.listening` 和 `moneyhand.stopped`。
+
+项目不安装 daemon、服务、Native Host 或跨任务常驻进程。每个 Agent 任务创建一个 controller，在 `finally` 或 JSONL shutdown 闭环中回收。
+
+## 文件边界
+
+| 路径 | 作用 |
+| --- | --- |
+| `skills/npc-moneyhand/SKILL.md` | 触发条件、核心工作流和按需 reference 路由 |
+| `skills/npc-moneyhand/scripts/moneyhand.mjs` | `moneyhand` CLI、ESM、JSONL 和任务模块入口 |
+| `skills/npc-moneyhand/scripts/lib/peer.mjs` | loopback WebSocket Peer 和会话管理 |
+| `skills/npc-moneyhand/scripts/lib/task-spaces.mjs` | 精确 Profile/tab 所有权和任务绑定 |
+| `skills/npc-moneyhand/scripts/lib/page-transitions.mjs` | 单次导航、稳定 readiness 和结果未知语义 |
+| `skills/npc-moneyhand/scripts/lib/semantic-*.mjs` | 有界语义快照、稳定 locator 和受守卫动作 |
+| `skills/npc-moneyhand/scripts/lib/task-approvals.mjs` | 高影响动作的一次性审批 |
+| `skills/npc-moneyhand/scripts/lib/rate-control.mjs` | pilot、退避、cooldown、恢复和 circuit |
+| `skills/npc-moneyhand/assets/disposable-task.mjs` | 可复制的可信本地任务模块模板 |
+| `skills/npc-moneyhand/references/*.md` | 按需加载的生命周期、浏览器工作流、限流和组合说明 |
+| `skills/npc-moneyhand/references/*.json` | 机器可读控制面、wire 和 operation catalog |
+| `extension/background.js` | 组装 bridge，响应弹窗配置和连接状态 |
+| `extension/bridge.js` | 握手、心跳、重连、关联、去重、队列和背压 |
+| `extension/executor.js` | CDP、Input、Chrome API、行为和观察方法 |
+| `extension/protocol.js` | wire 常量、默认值、验证和 envelope |
+| `extension/popup.*` | 仅编辑本机地址/端口并显示状态 |
+| `scripts/install-skill.mjs` | link/copy 安装、更新、移除和可恢复回滚 |
+| `docs/` | 用户与集成文档 |
+
+专项 Skill 不进入本表的核心发布边界；它们通过公开控制契约组合。
+
+## 生命周期
+
+~~~text
+Agent task starts
+  → create/start one MoneyHand controller
+  → bind loopback endpoint
+  → moneyhand.listening
+  → Extension reconnects and completes npc-moneyhand/2 handshake
+  → wait for compatible session
+  → create Task Space for dependent work
+  → execute raw/human browser phases
+  → inspect unknown outcomes and checkpoint rate state
+  → drain
+  → shutdown/stop
+  → moneyhand.stopped
+  → stdout EOF or ESM finally complete
+~~~
+
+一个端口属于一个 Agent 任务。多个 Chrome Profile 可以连接同一 controller；默认目标按当前焦点、持久化的最后焦点时间和稳定 session 顺序选择。多步任务必须使用 Task Space 固定 `instanceId + bootId`，防止中途焦点变化改写目标。
+
+Extension 主动连接 Skill listener。活跃 Service Worker 通常在短退避后发现 listener，持久 alarm 负责跨 MV3 休眠重试；Chrome 关闭、扩展禁用或系统休眠时，listener 无法启动或唤醒它。
+
+## 控制面和 wire
+
+Agent 宿主优先使用 Skill 控制面：
+
+- ESM：在一个任务内持有 `createMoneyHand()` 实例；
+- JSONL：用 `{"id","op","args"}` envelope，按 ID 关联乱序结果；
+- `--once`：只适合一个独立事务；
+- `--task`：在一个 controller 内运行可信本地多步模块。
+
+只有实现兼容适配器时才直接处理 Extension wire。wire 每帧是 UTF-8 JSON 文本，版本字段 `v:2`；握手以 `hello`、可选 HMAC、`ready` 和确认性 `ping/pong` 完成。Agent 请求与 Extension terminal response 通过唯一 request ID 关联。
+
+Task Space ID、JSONL command ID 和 wire request ID 是不同标识，不得互换。
+
+## 调度和结果语义
+
+Extension 对同一 tab/target 顺序执行，对不同目标并行。全局/窗口独占操作与冲突工作 fail closed。最近终态有界缓存只用于短期重复帧保护，不能把旧 ID 当成永久幂等键。
+
+已派发动作在超时、abort 或断线后可能返回 `OUTCOME_UNKNOWN`：
+
+1. 保留原 request ID、Profile `instanceId + bootId` 和观察证据；
+2. 检查页面、下载或业务系统真实状态；
+3. 只有在人工或 Agent 明确核查后才确认对应 unknown ID；
+4. 不自动重放输入、导航、下载或写操作。
+
+## 观察与动作层次
+
+浏览器内按以下顺序升级：
+
+1. 复用已有结构化数据；
+2. CDP Network JSON 或明确只读的同会话请求；
+3. CDP Runtime/DOM 批量读取；
+4. 交互式懒加载、分页和语义动作；
+5. 页面截图 + `css-viewport-v1` CDP Input；
+6. 页面之外交给人。
+
+语义快照默认有界且短期有效。每次导航、frame/loader 变化、Profile boot 变化、歧义或 viewport 漂移后重新解析。不得执行由页面内容拼出的任意 JavaScript。
+
+浏览器 toolbar、扩展页、原生对话框、权限提示、系统认证、桌面应用和 CAPTCHA 不属于 MoneyHand 页面执行面。项目没有自动桌面 fallback；`routeSurface()` 只返回 `moneyhand` 或 `human`。
+
+## 行为和限流
+
+行为优先级：
+
+~~~text
+raw default
+  < connection-scoped behavior.set with TTL
+  < per-request behavior override
+~~~
+
+`raw` 是默认快速路径。`human` 必须由 Agent 或专项 Skill 显式选择，并在阶段结束 reset；它只改变输入形态和节奏。
+
+自适应 rate controller 运行在 Skill 侧，按任务/站点/账号边界维护状态：
+
+~~~text
+pilot → steady
+   │ throttle / abnormal latency
+   ▼
+backoff → cooldown → cautious recovery
+   │ repeated throttle / challenge / account change
+   ▼
+circuit-open → checkpoint + Agent/human decision
+~~~
+
+先降并发，再增加带 jitter 的间隔；只有连续干净的小批次才逐步恢复。控制器不能保证绕过平台限流，也不能把挑战页当作可自动突破的障碍。
+
+rate controller 是显式 caller scheduler，不是 `request()` 的透明拦截器。因为低层请求没有可
+信任的 origin/Profile/account scope，专项 Skill 必须在每个受控批次前消费 decision、按其调度，
+并在批次后回传观察；机器能力以 `implicitRequestGate:false` 明确这一边界。
+
+## 专项 Skill 组合
+
+专项 Skill（如 Reddit 评论、红人开发、VOC）拥有平台工作流、字段、分页、去重、checkpoint 和输出。它通过 MoneyHand 公开控制契约请求浏览器能力，但必须复用当前任务唯一 controller。
+
+禁止：
+
+- 复制 Peer 或启动第二个同端口 listener；
+- 绕过 Task Space、审批、unknown-outcome 和 rate-control 约束；
+- 把站点解析器、持久数据库、模型 SDK或账号策略写进 Extension；
+- 从页面内容生成并执行任务模块。
+
+可信次抛任务模块只拥有任务逻辑，CLI 拥有 controller 的 start/wait/stop。
+
+## 网络与信任边界
+
+- listener 只绑定 `127.0.0.1`、`localhost` 或 `::1`；
+- endpoint 固定为 `ws://<loopback>:<port>/extension`；
+- Peer 校验 request-target、Host、remote address 和 Chrome Extension Origin；
+- 首个完成握手的 Extension Origin 锁定本次 controller 生命周期；
+- 可选配对密钥只来自 `NPC_MONEYHAND_PAIRING_TOKEN`；
+- 页面文本和可见控件始终是不可信输入；
+- CDP 技术可见性不是数据权利或业务授权；
+- 付款、发布、发送、删除、上传等高影响效果必须绑定当前明确确认。
+
+## 验证边界
+
+- `npm run check`：静态边界、契约和 Node 测试；
+- packaged acceptance：安装后 descriptor/catalog/CLI 生命周期；
+- isolated Chrome：一次性 Profile 的协议和输入闭环；
+- real Chrome Profile：用户当前扩展、焦点、登录态、MV3 重连和目标网站；
+- long-run/rate test：真实时间窗口内的稳定性与恢复。
+
+这些是不同证据层。任一层通过都不能替代其他层。

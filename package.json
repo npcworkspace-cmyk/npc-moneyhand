@@ -1,0 +1,31 @@
+{
+  "name": "npc-moneyhand",
+  "version": "1.0.0",
+  "description": "A zero-dependency MoneyHand Agent Skill and WS-only Chrome extension",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./skills/npc-moneyhand/scripts/moneyhand.mjs",
+    "./preflight": "./skills/npc-moneyhand/scripts/preflight.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/check.mjs && node scripts/audit-product-boundaries.mjs && node --test",
+    "audit:boundaries": "node scripts/audit-product-boundaries.mjs",
+    "accept:agents:packaged": "node scripts/packaged-agent-conformance.mjs",
+    "release:pack": "node scripts/build-agent-release.mjs",
+    "skill:pack:portable": "node scripts/build-portable-skill.mjs",
+    "bench:control": "node scripts/benchmark-control-plane.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "skill:link": "node scripts/install-skill.mjs --mode link",
+    "skill:install": "node scripts/install-skill.mjs --mode copy",
+    "e2e:chrome": "node scripts/real-chrome-e2e.mjs",
+    "smoke:chrome": "node scripts/real-chrome-smoke.mjs",
+    "smoke:site": "node scripts/real-chrome-site-smoke.mjs",
+    "accept:moneyhand:isolated-multiprofile": "node scripts/moneyhand-isolated-multiprofile-acceptance.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

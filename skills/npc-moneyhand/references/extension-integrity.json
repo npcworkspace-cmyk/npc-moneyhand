@@ -1,0 +1,134 @@
+{
+  "schema": "npc-moneyhand-extension-integrity/1",
+  "product": "npc-moneyhand",
+  "version": "1.0.0",
+  "algorithm": "sha256",
+  "coverage": {
+    "mode": "complete-extension-tree",
+    "fileCount": 24,
+    "excluded": [],
+    "generated": []
+  },
+  "files": [
+    {
+      "path": "background.js",
+      "bytes": 884,
+      "sha256": "3793896e2ebbae14e38648f548033cc9f9c84c2485df8b193d751fa32e4f20f0"
+    },
+    {
+      "path": "bridge.js",
+      "bytes": 43359,
+      "sha256": "61b68b61643bbf4469633221b9e645e1736e886d93449de73c115f1567693ae5"
+    },
+    {
+      "path": "executor.js",
+      "bytes": 45303,
+      "sha256": "ffcd2b3fcf5ba511010e44378bf55f18f1c5bcb0035b00377ecbb371edcbcfcc"
+    },
+    {
+      "path": "icons/smile-blue-128.png",
+      "bytes": 3776,
+      "sha256": "729fe8c6c6f42f25253e82717f90a4d83f52cd90cbf39fc4e49d530b11d8ec87"
+    },
+    {
+      "path": "icons/smile-blue-16.png",
+      "bytes": 441,
+      "sha256": "d6bc560ba4dc8785c6aea0a3a7ebf180c834e2c0ddb7326cfb1f385b23c53651"
+    },
+    {
+      "path": "icons/smile-blue-32.png",
+      "bytes": 865,
+      "sha256": "da08df2fd6a90869881b4677241cfaab2538f5cfc4ef4b8e83583ae8c7a36e66"
+    },
+    {
+      "path": "icons/smile-blue-48.png",
+      "bytes": 1299,
+      "sha256": "70325238888945407021244876fe6e696e82324d099e872d20f873d40459f779"
+    },
+    {
+      "path": "icons/smile-green-128.png",
+      "bytes": 3755,
+      "sha256": "9b17bc365dd396153f241508a70c5ff5d52f16ae41be35b374ac66f66c22ad54"
+    },
+    {
+      "path": "icons/smile-green-16.png",
+      "bytes": 448,
+      "sha256": "7b5c0d62cf8b6c678d7c92ad1c892495ea6c7d0fcccb7d1f7ca0d770b7c89ecc"
+    },
+    {
+      "path": "icons/smile-green-32.png",
+      "bytes": 861,
+      "sha256": "c1188b75b9e8ad123fce646899c28f7b7e10fed832ad5685b993d52803bfbc4d"
+    },
+    {
+      "path": "icons/smile-green-48.png",
+      "bytes": 1299,
+      "sha256": "cece70f2c5a37528b6f310e42cf59cac5a42b004c67a3b0d380bf4bde99cb573"
+    },
+    {
+      "path": "icons/smile-red-128.png",
+      "bytes": 3678,
+      "sha256": "c102f1a7523fc8484d42f3482e90b138bd63ac9050ddcce44604430a42b6f1fe"
+    },
+    {
+      "path": "icons/smile-red-16.png",
+      "bytes": 436,
+      "sha256": "3fa500fd33a9e71e0821c8ba17c150549c1f67d8df2ad2b7b354598ef0cf2be6"
+    },
+    {
+      "path": "icons/smile-red-32.png",
+      "bytes": 848,
+      "sha256": "d6da455af371c88fa68dfde88dc4a0bc8d0c6f4f39e7aacda225c441f5e8917f"
+    },
+    {
+      "path": "icons/smile-red-48.png",
+      "bytes": 1254,
+      "sha256": "f53602ad5377ad6e1508053cb530871632fe35915562768ad750c2b3f0ac47f8"
+    },
+    {
+      "path": "icons/smile-yellow-128.png",
+      "bytes": 3651,
+      "sha256": "f19def911806aa7a515297d6faf806bc6f7718f55bc284c80bc706ce91c823c7"
+    },
+    {
+      "path": "icons/smile-yellow-16.png",
+      "bytes": 429,
+      "sha256": "88bd07d00706d95a057aeaf6d2a4c416a6da2d283783c9e994148809b95717fc"
+    },
+    {
+      "path": "icons/smile-yellow-32.png",
+      "bytes": 815,
+      "sha256": "5b19fa06f2844544e31234ddf9b2b0797346ec0bd83be4c9248869957c4c6e56"
+    },
+    {
+      "path": "icons/smile-yellow-48.png",
+      "bytes": 1237,
+      "sha256": "d9a838f4aafc33c64a3056f209b1c45e8dc26754c2fbe7586fdfa6d5cfa23a5a"
+    },
+    {
+      "path": "manifest.json",
+      "bytes": 849,
+      "sha256": "687f6f1fad837ef54aa413633cd3e6af4333ef95808396d82edd16293316402c"
+    },
+    {
+      "path": "popup.css",
+      "bytes": 1565,
+      "sha256": "60d71a800f9a0e955f109e1bb68eed450320bf1c2b40e2cf496315f7af33751d"
+    },
+    {
+      "path": "popup.html",
+      "bytes": 992,
+      "sha256": "c53e019a51fdd3fa099b22d713c91de1ad095ec6ef741668cee9b6b4edb5aa29"
+    },
+    {
+      "path": "popup.js",
+      "bytes": 2985,
+      "sha256": "38eb826bbf2e1c5933a2d8a2afa42f3b62d1ecd30a9a64b575109967065597df"
+    },
+    {
+      "path": "protocol.js",
+      "bytes": 8283,
+      "sha256": "6b61ab51accc2a404868e1fcd7e2a60ceb500fc883b8f9ee0c7d6cc8d7903c2e"
+    }
+  ]
+}

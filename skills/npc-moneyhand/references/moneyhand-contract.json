@@ -1,0 +1,2910 @@
+{
+  "schemaVersion": 1,
+  "package": "npc-moneyhand",
+  "version": "1.0.0",
+  "controlProtocol": "npc-moneyhand-control/1",
+  "wireProtocol": "npc-moneyhand/2",
+  "runtime": {
+    "kind": "node",
+    "minimumMajor": 20,
+    "productionMajors": [
+      22,
+      24
+    ],
+    "externalPackages": 0
+  },
+  "installationPreflight": {
+    "schema": "npc-moneyhand-preflight/1",
+    "executable": "moneyhand-preflight",
+    "script": "scripts/preflight.mjs",
+    "firstUsePolicy": "required-by-skill-instructions",
+    "automaticOnSkillRead": false,
+    "platforms": [
+      "win32",
+      "darwin",
+      "linux"
+    ],
+    "chromiumFamilies": [
+      "chrome",
+      "edge",
+      "chromium",
+      "brave",
+      "vivaldi",
+      "opera",
+      "360",
+      "qq-browser",
+      "custom-chromium"
+    ],
+    "customBrowserRootFlag": "--browser-root",
+    "scan": "bounded-known-roots-and-explicit-roots",
+    "extensionEvidence": "complete-extension-tree-sha256",
+    "integrityManifest": "references/extension-integrity.json",
+    "configurationStateEvidence": "preferences-and-secure-preferences",
+    "startEligibility": "complete-scan-with-enabled-declared-integrity-match",
+    "liveHandshakeRequired": true,
+    "maximumTotalReadBytes": 268435456,
+    "maximumReportedInstallations": 128,
+    "maximumReportedUnverifiedCandidates": 128,
+    "extensionDistribution": {
+      "bundledWithSkill": false,
+      "automaticDownload": false,
+      "repositoryUrl": "https://github.com/npcworkspace-cmyk/npc-moneyhand",
+      "releasesUrl": "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
+      "assetName": "npc-moneyhand-extension-1.0.0.zip",
+      "manualInstallRequired": true
+    },
+    "readOnly": true,
+    "startsBrowser": false,
+    "startsListener": false,
+    "writesFilesystem": false,
+    "excludedProfileData": [
+      "cookies",
+      "passwords",
+      "history",
+      "local-storage",
+      "page-data"
+    ]
+  },
+  "agentInterop": {
+    "protocol": "npc-agent-jsonl/1",
+    "framing": "utf-8-jsonl",
+    "startupEvent": "moneyhand.listening",
+    "stoppedEvent": "moneyhand.stopped",
+    "commandFields": {
+      "correlation": "id",
+      "operation": "op",
+      "arguments": "args"
+    },
+    "argumentPolicy": {
+      "shape": "object",
+      "legacyTopLevelAccepted": true,
+      "mixedWithTopLevel": "reject",
+      "reservedFields": [
+        "id",
+        "op",
+        "args"
+      ]
+    },
+    "operationCatalog": {
+      "schema": "npc-agent-operation-catalog/1",
+      "discovery": "--describe",
+      "resource": "references/agent-operations.json",
+      "descriptorField": "operationCatalog",
+      "operationListField": "capabilities.operations.jsonl"
+    },
+    "resultFields": {
+      "type": "result",
+      "correlation": "id",
+      "success": "ok"
+    },
+    "lifecycleOperations": [
+      "capabilities",
+      "status",
+      "cancel",
+      "drain",
+      "shutdown"
+    ],
+    "completion": "stopped-event-and-stdout-eof"
+  },
+  "ownership": {
+    "model": "single-agent-task",
+    "sharedPort": false,
+    "independentDaemon": false,
+    "taskSpaces": {
+      "location": "agent-side",
+      "pinnedSession": true,
+      "owners": [
+        "agent",
+        "user"
+      ],
+      "takeover": "explicit-user-confirmation-record",
+      "extensionDependency": false,
+      "maximumParallelRequests": 64,
+      "maximumConcurrency": 16,
+      "highImpactApproval": {
+        "effects": [
+          "delete",
+          "payment",
+          "publish",
+          "send",
+          "upload",
+          "external-write"
+        ],
+        "token": "one-time-request-bound",
+        "confirmation": "recent-explicit-user-record",
+        "activity": "bounded-agent-local-ledger"
+      }
+    }
+  },
+  "agentPolicy": {
+    "dataAcquisition": {
+      "objective": "minimum-total-elapsed-time",
+      "appliesWhen": "user-method-unspecified",
+      "defaultBehaviorMode": "raw",
+      "probe": "bounded-sample-before-page-iteration",
+      "pilot": {
+        "requiredBeforeScale": true,
+        "sample": "smallest-representative-batch",
+        "validate": [
+          "authorization-and-access-boundary",
+          "required-field-coverage",
+          "pagination-and-deduplication",
+          "account-state-unchanged",
+          "baseline-latency-and-rate-signals"
+        ],
+        "scale": "gradual-batch-and-concurrency-ramp"
+      },
+      "rateControl": {
+        "mode": "adaptive",
+        "signals": [
+          "http-429",
+          "retry-after",
+          "rate-limit-headers",
+          "throttle-payload",
+          "http-503",
+          "access-challenge",
+          "latency-regression"
+        ],
+        "onThrottle": [
+          "honor-retry-after",
+          "reduce-concurrency-first",
+          "increase-interval-exponentially-with-jitter",
+          "retry-known-readonly-only",
+          "checkpoint-before-retry"
+        ],
+        "onRecovery": [
+          "require-consecutive-clean-batches",
+          "decrease-interval-gradually",
+          "do-not-exceed-last-known-safe-rate"
+        ],
+        "stopSignals": [
+          "access-challenge",
+          "persistent-403",
+          "account-state-change",
+          "repeated-throttle-at-minimum-concurrency"
+        ]
+      },
+      "orderedPlanes": [
+        "existing-structured-data",
+        "cdp-network-json",
+        "same-session-readonly-replay",
+        "cdp-runtime-dom-batch",
+        "browser-ui-lazy-load",
+        "explicit-screenshot"
+      ],
+      "rules": {
+        "rankEligiblePlanesOnly": true,
+        "technicalAccessDoesNotGrantAuthorization": true,
+        "respectTaskScopeAndDataRights": true,
+        "stopProbeWhenStableComplete": true,
+        "fallbackWhenProbeCostsMoreThanDom": true,
+        "readOnlyByDefault": true,
+        "reuseCurrentSessionWithoutExportingCredentials": true,
+        "replayOnlyKnownReadOnlyRequests": true,
+        "requireAuthorizationForWrites": true,
+        "neverBypassAccessControls": true,
+        "respectPlatformLimits": true,
+        "screenshotLastResort": true
+      }
+    }
+  },
+  "semanticObservation": {
+    "operation": "captureSemanticSnapshot",
+    "defaultSource": "Accessibility.getFullAXTree",
+    "optionalDomSource": "DOMSnapshot.captureSnapshot",
+    "domSnapshotDefault": false,
+    "references": "short-lived-snapshot-local",
+    "stableLocators": true,
+    "ttlMs": 120000,
+    "maximumSnapshots": 16,
+    "frameScope": {
+      "option": "includeFrames",
+      "default": false,
+      "defaultMaximumFrames": 16,
+      "maximumFrames": 32,
+      "maximumDiscoveredFrames": 2048,
+      "maximumFrameDepth": 128,
+      "sameProcessFrames": true,
+      "flattenedOopifFrames": true,
+      "nested": true,
+      "frameBoundLocators": true,
+      "sessionRegistrySettledLocally": true,
+      "sessionRegistryQuietWindowMs": 50,
+      "sessionRegistrySettleTimeoutMs": 250,
+      "identityBinding": {
+        "fieldsStoredSeparately": true,
+        "targetAndPageFrameIdValuesMayMatch": true,
+        "fields": [
+          "sessionId",
+          "targetId",
+          "frameId",
+          "parentFrameId",
+          "loaderId",
+          "url"
+        ]
+      },
+      "clickMapping": "child-frame-to-target-root-then-cross-session-content-quads-to-top-level",
+      "finalHitTest": "terminal-frame-or-exact-top-level-frame-owner",
+      "callerPageJavaScript": false
+    },
+    "locatorWait": {
+      "operation": "waitForSemanticLocator",
+      "kinds": [
+        "role",
+        "css"
+      ],
+      "states": [
+        "attached",
+        "actionable"
+      ],
+      "defaultStablePolls": 2,
+      "profileBootPinnedAfterFirstSnapshot": true,
+      "transient": [
+        "missing",
+        "not-actionable",
+        "backend-node-unavailable",
+        "disabled"
+      ],
+      "ambiguity": "fail-closed",
+      "cssUniqueness": "only-currently-unique-snapshot-locators-match",
+      "callerPageJavaScript": false
+    },
+    "locatorAction": {
+      "operation": "actSemanticLocator",
+      "workflow": "task-space-pinned-locator-wait-then-fresh-ref-action-and-verification",
+      "sourceState": "actionable",
+      "defaultStablePolls": 2,
+      "taskSpacePinnedBeforeFirstSnapshot": true,
+      "returnsSnapshotContent": false,
+      "retainsInternalSnapshot": false,
+      "dragDestinationField": "toLocator",
+      "dragDestinationRequirement": "unique-actionable-in-final-source-snapshot-and-live-revalidated",
+      "highImpact": "explicit-waitForSemanticLocator-approveSemanticRefAction-actSemanticRef-path",
+      "callerPageJavaScript": false
+    },
+    "refActions": {
+      "operation": "actSemanticRef",
+      "actions": [
+        "click",
+        "download",
+        "hover",
+        "scroll",
+        "drag",
+        "upload",
+        "select",
+        "check",
+        "uncheck",
+        "type",
+        "key"
+      ],
+      "coordinateActions": [
+        "click",
+        "download",
+        "hover",
+        "scroll",
+        "drag",
+        "check",
+        "uncheck"
+      ],
+      "scrollDeltaRange": [
+        -100000,
+        100000
+      ],
+      "dragDestinationField": "toRef",
+      "dragRequiresSameSnapshot": true,
+      "dragRequiresSimultaneousVisibility": true,
+      "dragVerificationTarget": "source",
+      "download": {
+        "effect": "download",
+        "dispatch": "one-guarded-left-click",
+        "baseline": "profile-download-ids-before-final-no-scroll-preflight",
+        "observation": "bounded-chrome-downloads-search-poll",
+        "eventDependency": false,
+        "matcherFields": [
+          "filename",
+          "url",
+          "finalUrl",
+          "mime"
+        ],
+        "matcherMode": "exact",
+        "defaultTimeoutMs": 30000,
+        "maximumTimeoutMs": 300000,
+        "defaultPollIntervalMs": 250,
+        "maximumRecentDownloads": 255,
+        "sameProfileConcurrentDownloads": "fail-closed",
+        "pathsReturned": false,
+        "urlQueryOrFragmentReturned": false,
+        "fileExistenceVerified": false,
+        "resultFields": [
+          "id",
+          "state",
+          "filename",
+          "url",
+          "finalUrl",
+          "mime",
+          "danger",
+          "bytesReceived",
+          "totalBytes",
+          "fileSize",
+          "startTime",
+          "endTime"
+        ],
+        "defaultVerification": "download-complete",
+        "timeoutOrAmbiguity": "action-dispatched-inspect-before-retry"
+      },
+      "upload": {
+        "effect": "upload",
+        "fileRootRequired": true,
+        "pathPolicy": "existing-regular-files-realpath-confined",
+        "identityEvidence": [
+          "path",
+          "size",
+          "mtimeNs",
+          "device",
+          "inode"
+        ],
+        "networkOrDevicePathsAllowed": false,
+        "volumeRootAllowed": false,
+        "pathsReturned": false,
+        "evidenceRecheckedBeforeApprovalConsumption": true,
+        "maxFiles": 16,
+        "maxFileBytes": 2147483648,
+        "maxTotalBytes": 4294967296,
+        "hiddenFileInputAllowed": true,
+        "multipleFilesRequireMultipleInput": true,
+        "defaultVerification": "target-files-set",
+        "fileContentsReadByController": false
+      },
+      "select": {
+        "descriptorForms": [
+          "value",
+          "label",
+          "index"
+        ],
+        "primitiveString": "value",
+        "primitiveInteger": "index",
+        "maximumDescriptors": 16,
+        "maximumNativeOptions": 4096,
+        "exactUniqueMatchRequired": true,
+        "disabledOptionsAllowed": false,
+        "multipleDescriptorsRequireMultipleSelect": true,
+        "callerPageJavaScript": false,
+        "preflightBeforeApprovalConsumption": true,
+        "dispatch": "fixed-runtime-function",
+        "events": [
+          "input",
+          "change"
+        ],
+        "trustedEvents": false,
+        "resultFields": [
+          "index",
+          "value",
+          "label"
+        ],
+        "defaultVerification": "target-options-selected"
+      },
+      "checkable": {
+        "actions": [
+          "check",
+          "uncheck"
+        ],
+        "nativeTargets": [
+          "input[type=checkbox]",
+          "input[type=radio]"
+        ],
+        "ariaRoles": [
+          "checkbox",
+          "radio",
+          "switch"
+        ],
+        "uncheckRadioAllowed": false,
+        "mixedOrIndeterminateAllowed": false,
+        "idempotentNoInput": true,
+        "finalPreflightBeforeApprovalConsumption": true,
+        "highImpactNoopConsumesApproval": true,
+        "dispatchWhenNeeded": "moneyhand-cdp-pointer-click",
+        "directDomPropertyMutation": false,
+        "callerPageJavaScript": false,
+        "verificationKinds": [
+          "target-checked"
+        ],
+        "resultFields": [
+          "actionDispatched",
+          "checkedState",
+          "terminal"
+        ],
+        "defaultVerification": "target-checked",
+        "noInputPostconditionFailure": "safe-to-recheck"
+      },
+      "taskSpaceRequired": true,
+      "effectFieldRequired": true,
+      "highImpactApprovalOperation": "approveSemanticRefAction",
+      "verificationKinds": [
+        "observe",
+        "download-complete",
+        "target-text-inserted",
+        "target-value-equals",
+        "target-value-includes",
+        "target-checked",
+        "target-focused",
+        "target-detached",
+        "target-files-set",
+        "target-options-selected",
+        "url-equals",
+        "url-includes",
+        "url-changed",
+        "loader-changed"
+      ],
+      "preflight": [
+        "exact-profile-boot-and-tab",
+        "exact-frame-session-path",
+        "snapshot-loader-and-url",
+        "isolated-world-fixed-functions",
+        "live-backend-node",
+        "fresh-viewport-hit-test",
+        "frame-owner-content-quads-and-top-level-hit-test",
+        "visible-not-disabled-not-inert",
+        "profile-download-baseline-and-final-no-scroll-target-read",
+        "fixed-file-input-inspection",
+        "confined-upload-file-identity",
+        "fixed-select-option-resolution-and-dispatch",
+        "binary-checkable-state-and-idempotent-pointer-dispatch"
+      ],
+      "defaultPointerAndKeyVerification": "observation-only",
+      "defaultDownloadVerification": "download-complete",
+      "defaultTypeVerification": "target-text-inserted",
+      "defaultUploadVerification": "target-files-set",
+      "defaultSelectVerification": "target-options-selected",
+      "defaultCheckVerification": "target-checked",
+      "postconditionFailure": "action-dispatched-inspect-before-retry",
+      "unknownOutcome": "never-retry-blindly"
+    },
+    "oopifBoundary": "optional-includeFrames; flattened-session-aware nested refs and guarded clicks"
+  },
+  "pageTransitions": {
+    "operations": {
+      "wait": "waitForTaskPage",
+      "navigate": "navigateTaskTab"
+    },
+    "taskSpaceRequired": true,
+    "tabScoped": true,
+    "effects": {
+      "wait": "read-only",
+      "navigate": "navigation"
+    },
+    "waitUntil": [
+      "commit",
+      "domcontentloaded",
+      "load"
+    ],
+    "urlMatchModes": [
+      "exact",
+      "prefix",
+      "includes",
+      "origin",
+      "origin+path"
+    ],
+    "navigationSchemes": [
+      "http",
+      "https",
+      "about:blank"
+    ],
+    "callerPageJavaScript": false,
+    "readinessProbe": "Page.getFrameTree-plus-fixed-document.readyState-batch",
+    "eventDependency": false,
+    "defaultTimeoutMs": 30000,
+    "maximumTimeoutMs": 300000,
+    "timeoutMeaning": "document-readiness-budget-after-navigation-dispatch",
+    "finalProbeRequestTimeout": "min(hand-request-timeout,max(250ms,remaining-readiness-budget))",
+    "defaultPollIntervalMs": 100,
+    "defaultStablePolls": 2,
+    "maximumObservations": 512,
+    "sameProfileTabConcurrency": "fail-closed",
+    "differentProfileOrTabConcurrency": true,
+    "redirectPolicy": "observe-final-stable-frame-state; optional-fixed-url-match",
+    "commitClaim": "Page.navigate-command-acknowledged-only",
+    "readyClaim": "document-readiness-only-not-business-success",
+    "timeoutAfterNavigation": "action-dispatched-inspect-before-retry"
+  },
+  "siteLearnings": {
+    "location": "agent-side-memory",
+    "versioned": true,
+    "executable": false,
+    "matching": "exact-host-or-leading-wildcard-plus-path-prefix",
+    "maximumRecords": 128,
+    "maximumBytes": 524288,
+    "rules": [
+      "local-trusted-input-only",
+      "no-cookies-tokens-or-request-headers",
+      "no-page-provided-code",
+      "higher-revision-replaces-lower-revision"
+    ]
+  },
+  "surfaceRouting": {
+    "operation": "routeSurface",
+    "order": [
+      "moneyhand-semantic",
+      "moneyhand-page-visual",
+      "human"
+    ],
+    "browserUnreachable": "human-takeover",
+    "highImpactRequiresConfirmation": true
+  },
+  "transports": {
+    "discovery": {
+      "flag": "--describe",
+      "schema": "npc-agent-cli-descriptor/1",
+      "output": "one-utf-8-json-line",
+      "startsProduct": false,
+      "consumesStdin": false,
+      "inputSideEffect": false
+    },
+    "npm": {
+      "package": "npc-moneyhand",
+      "bin": "moneyhand",
+      "externalPackages": 0
+    },
+    "esm": {
+      "entrypoint": "scripts/moneyhand.mjs",
+      "export": "createMoneyHand"
+    },
+    "jsonl": {
+      "entrypoint": "scripts/moneyhand.mjs",
+      "encoding": "utf-8",
+      "maximumLineBytes": 1048576,
+      "maximumInflight": 256,
+      "resultsMayBeOutOfOrder": true,
+      "invalidUtf8": "reject-line-and-continue",
+      "oneShotFlag": "--once",
+      "consumerCompletionRule": "Drain stdout to EOF, parse every expected result ID, and verify moneyhand.stopped for a normal finite run; exit code alone does not prove consumption."
+    },
+    "taskModule": {
+      "flag": "--task",
+      "requiredExport": "run",
+      "signature": "run({ moneyhand, signal, args })",
+      "security": "trusted-local-code",
+      "resultId": "task"
+    }
+  },
+  "jsonlFieldSeparation": {
+    "correlationId": "id",
+    "taskSpaceId": "taskSpaceId",
+    "rule": "Never reuse the JSONL correlation id as a Task Space identity."
+  },
+  "programmaticOperations": [
+    "capabilities",
+    "status",
+    "wait",
+    "request",
+    "captureViewportBundle",
+    "captureSemanticSnapshot",
+    "waitForSemanticLocator",
+    "resolveSemanticRef",
+    "actSemanticRef",
+    "actSemanticLocator",
+    "waitForTaskPage",
+    "navigateTaskTab",
+    "createTaskSpace",
+    "listTaskSpaces",
+    "handOffTaskSpace",
+    "takeOverTaskSpace",
+    "completeTaskSpace",
+    "taskRequest",
+    "parallelTaskRequests",
+    "routeSurface",
+    "registerSiteLearning",
+    "listSiteLearnings",
+    "removeSiteLearning",
+    "resolveSiteLearnings",
+    "approveSemanticRefAction",
+    "approveTaskEffect",
+    "listApprovalActivity",
+    "confirmUnknown",
+    "rateControl"
+  ],
+  "highImpactApproval": {
+    "scope": "taskRequest, parallelTaskRequests and actSemanticRef",
+    "effectFieldRequired": true,
+    "requestBinding": "sha256-canonical-json",
+    "oneTime": true,
+    "maximumTtlMs": 120000,
+    "maximumConfirmationAgeMs": 300000,
+    "rawRequestBoundary": "Low-level request remains a trusted developer API and cannot infer business intent; high-impact Agent workflows must use the guarded Task Space APIs."
+  },
+  "jsonlControlOperations": {
+    "cancel": {
+      "canonicalRequired": [
+        "id",
+        "op",
+        "args.targetId"
+      ],
+      "legacyRequired": [
+        "id",
+        "op",
+        "targetId"
+      ],
+      "semantics": "Signals one active local operation; the target result defines whether it was aborted before send or became outcome-unknown after send."
+    },
+    "drain": {
+      "canonicalRequired": [
+        "id",
+        "op",
+        "args"
+      ],
+      "legacyRequired": [
+        "id",
+        "op"
+      ],
+      "semantics": "Completes after commands accepted before the barrier settle."
+    },
+    "shutdown": {
+      "canonicalRequired": [
+        "id",
+        "op",
+        "args"
+      ],
+      "legacyRequired": [
+        "id",
+        "op"
+      ],
+      "semantics": "Stops accepting input, aborts active commands, closes the Peer, and returns a correlated result."
+    }
+  },
+  "resultEnvelope": {
+    "controllerSuccessField": "ok",
+    "handTerminalField": "value",
+    "rule": "An ok controller result can contain an extension terminal whose own ok is false or whose status is needs_instruction."
+  },
+  "events": {
+    "ordinaryHandEvents": "best-effort",
+    "correlatedResults": "reliable-until-output-timeout"
+  },
+  "artifacts": {
+    "mode": "local-file",
+    "screenshotMimeType": "image/png",
+    "requiresExistingLocalOutputRoot": true,
+    "networkAndDevicePaths": false
+  },
+  "sessionAffinity": {
+    "default": "latest-focused-session-per-request",
+    "dependentActions": "Pass the prior bundle.sessionSelector explicitly."
+  },
+  "recovery": {
+    "postSendTimeoutOrAbort": "OUTCOME_UNKNOWN",
+    "blindRetrySideEffects": false,
+    "unknownOutcomeAcknowledgement": "explicit"
+  },
+  "operationContracts": {
+    "capabilities": {
+      "operation": "capabilities",
+      "kind": "lifecycle",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/0/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/0/resultSchema"
+    },
+    "status": {
+      "operation": "status",
+      "kind": "lifecycle",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/1/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/1/resultSchema"
+    },
+    "wait": {
+      "operation": "wait",
+      "kind": "product",
+      "effects": [
+        "external-read"
+      ],
+      "requires": [
+        "hand-session-eventually"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/2/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/2/resultSchema"
+    },
+    "request": {
+      "operation": "request",
+      "kind": "product",
+      "effects": [
+        "caller-dependent"
+      ],
+      "requires": [
+        "hand-session"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/3/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/3/resultSchema",
+      "wireContractRef": "#/wireProtocolContract"
+    },
+    "captureViewportBundle": {
+      "operation": "captureViewportBundle",
+      "kind": "product",
+      "effects": [
+        "external-read",
+        "filesystem-write"
+      ],
+      "requires": [
+        "hand-session",
+        "existing-local-output-root"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/4/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/4/resultSchema"
+    },
+    "captureSemanticSnapshot": {
+      "operation": "captureSemanticSnapshot",
+      "kind": "product",
+      "effects": [
+        "external-read"
+      ],
+      "requires": [
+        "hand-session"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/5/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/5/resultSchema"
+    },
+    "waitForSemanticLocator": {
+      "operation": "waitForSemanticLocator",
+      "kind": "product",
+      "effects": [
+        "external-read"
+      ],
+      "requires": [
+        "hand-session",
+        "snapshot-derived-locator"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/6/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/6/resultSchema"
+    },
+    "resolveSemanticRef": {
+      "operation": "resolveSemanticRef",
+      "kind": "product",
+      "effects": [],
+      "requires": [
+        "semantic-snapshot"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/7/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/7/resultSchema"
+    },
+    "actSemanticRef": {
+      "operation": "actSemanticRef",
+      "kind": "product",
+      "effects": [
+        "external-write"
+      ],
+      "requires": [
+        "hand-session",
+        "task-space",
+        "semantic-snapshot",
+        "approval-if-high-impact"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/8/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/8/resultSchema"
+    },
+    "actSemanticLocator": {
+      "operation": "actSemanticLocator",
+      "kind": "product",
+      "effects": [
+        "external-read",
+        "external-write"
+      ],
+      "requires": [
+        "hand-session",
+        "task-space",
+        "snapshot-derived-locator",
+        "non-high-impact-effect"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/9/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/9/resultSchema"
+    },
+    "waitForTaskPage": {
+      "operation": "waitForTaskPage",
+      "kind": "product",
+      "effects": [
+        "external-read"
+      ],
+      "requires": [
+        "hand-session",
+        "task-space"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/10/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/10/resultSchema"
+    },
+    "navigateTaskTab": {
+      "operation": "navigateTaskTab",
+      "kind": "product",
+      "effects": [
+        "external-write"
+      ],
+      "requires": [
+        "hand-session",
+        "task-space"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/11/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/11/resultSchema"
+    },
+    "createTaskSpace": {
+      "operation": "createTaskSpace",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "hand-session"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/12/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/12/resultSchema"
+    },
+    "listTaskSpaces": {
+      "operation": "listTaskSpaces",
+      "kind": "product",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/13/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/13/resultSchema"
+    },
+    "handOffTaskSpace": {
+      "operation": "handOffTaskSpace",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "task-space"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/14/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/14/resultSchema"
+    },
+    "takeOverTaskSpace": {
+      "operation": "takeOverTaskSpace",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "task-space",
+        "confirmation-when-user-owned"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/15/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/15/resultSchema"
+    },
+    "completeTaskSpace": {
+      "operation": "completeTaskSpace",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "task-space",
+        "confirmation-when-user-owned"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/16/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/16/resultSchema"
+    },
+    "taskRequest": {
+      "operation": "taskRequest",
+      "kind": "product",
+      "effects": [
+        "caller-dependent"
+      ],
+      "requires": [
+        "hand-session",
+        "task-space",
+        "approval-if-high-impact"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/17/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/17/resultSchema"
+    },
+    "parallelTaskRequests": {
+      "operation": "parallelTaskRequests",
+      "kind": "product",
+      "effects": [
+        "caller-dependent"
+      ],
+      "requires": [
+        "hand-session",
+        "task-spaces",
+        "independent-work-items"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/18/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/18/resultSchema"
+    },
+    "routeSurface": {
+      "operation": "routeSurface",
+      "kind": "product",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/19/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/19/resultSchema"
+    },
+    "registerSiteLearning": {
+      "operation": "registerSiteLearning",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "trusted-local-input"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/20/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/20/resultSchema"
+    },
+    "listSiteLearnings": {
+      "operation": "listSiteLearnings",
+      "kind": "product",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/21/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/21/resultSchema"
+    },
+    "removeSiteLearning": {
+      "operation": "removeSiteLearning",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/22/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/22/resultSchema"
+    },
+    "resolveSiteLearnings": {
+      "operation": "resolveSiteLearnings",
+      "kind": "product",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/23/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/23/resultSchema"
+    },
+    "approveSemanticRefAction": {
+      "operation": "approveSemanticRefAction",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "task-space",
+        "semantic-snapshot",
+        "recent-user-confirmation"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/24/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/24/resultSchema"
+    },
+    "approveTaskEffect": {
+      "operation": "approveTaskEffect",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "task-space",
+        "recent-user-confirmation"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/25/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/25/resultSchema"
+    },
+    "listApprovalActivity": {
+      "operation": "listApprovalActivity",
+      "kind": "product",
+      "effects": [],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/26/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/26/resultSchema"
+    },
+    "confirmUnknown": {
+      "operation": "confirmUnknown",
+      "kind": "product",
+      "effects": [
+        "local-state"
+      ],
+      "requires": [
+        "exact-profile-boot",
+        "unknown-outcome-inspection"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/27/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/27/resultSchema"
+    },
+    "cancel": {
+      "operation": "cancel",
+      "kind": "control",
+      "effects": [
+        "process-control"
+      ],
+      "requires": [
+        "active-command"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/29/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/29/resultSchema"
+    },
+    "drain": {
+      "operation": "drain",
+      "kind": "control",
+      "effects": [
+        "process-control"
+      ],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/30/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/30/resultSchema"
+    },
+    "shutdown": {
+      "operation": "shutdown",
+      "kind": "control",
+      "effects": [
+        "process-lifecycle"
+      ],
+      "requires": [],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/31/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/31/resultSchema"
+    },
+    "rateControl": {
+      "operation": "rateControl",
+      "kind": "product",
+      "effects": [
+        "local-state",
+        "process-control"
+      ],
+      "requires": [
+        "origin-profile-scope-except-global-snapshot"
+      ],
+      "catalogResource": "references/agent-operations.json",
+      "argsSchemaRef": "references/agent-operations.json#/operations/28/argsSchema",
+      "resultSchemaRef": "references/agent-operations.json#/operations/28/resultSchema",
+      "actions": [
+        "plan",
+        "observe",
+        "checkpoint",
+        "wait",
+        "snapshot",
+        "reset"
+      ],
+      "state": "task-owned-agent-memory",
+      "checkpoint": "opaque-caller-token-no-credentials",
+      "enforcement": "explicit-caller-scheduler",
+      "implicitRequestGate": false,
+      "humanBypassesRateControl": false,
+      "actionDispatch": "strict-oneOf-by-action",
+      "result": "stable-action-dependent-oneOf"
+    }
+  },
+  "wireProtocolContract": {
+    "protocol": "npc-moneyhand/2",
+    "requestSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "system.status",
+            "behavior.get",
+            "behavior.set",
+            "behavior.reset",
+            "events.subscribe",
+            "events.unsubscribe",
+            "target.list",
+            "target.attach",
+            "target.detach",
+            "target.sessions",
+            "cdp.send",
+            "chrome.call",
+            "input.perform",
+            "batch.run",
+            "observe.context",
+            "observe.screenshot",
+            "instruction.resolve"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true
+        },
+        "behavior": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "human"
+              ]
+            },
+            "beforeMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "afterMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "betweenStepsMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "typingDelayMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000
+            },
+            "pointerSteps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "pointerDurationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "onUnclear": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "error"
+              ]
+            },
+            "ttlMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000,
+              "default": 300000
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "additionalProperties": false
+    },
+    "methods": {
+      "system.status": {
+        "effects": [
+          "external-read"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "const": "ws-only"
+            },
+            "behavior": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "raw",
+                    "human"
+                  ]
+                },
+                "beforeMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "afterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "betweenStepsMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "typingDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2000
+                },
+                "pointerSteps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "pointerDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "onUnclear": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "error"
+                  ]
+                },
+                "ttlMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000,
+                  "default": 300000
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "beforeMs",
+                "afterMs",
+                "betweenStepsMs",
+                "typingDelayMs",
+                "pointerSteps",
+                "pointerDurationMs",
+                "onUnclear",
+                "ttlMs"
+              ]
+            },
+            "eventPatterns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "minItems": 0
+            },
+            "attachedTabs": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "minItems": 0
+            },
+            "waiting": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tabId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "waitId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "since": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "error": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "tabId",
+                  "waitId",
+                  "since",
+                  "error"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "mode",
+            "behavior",
+            "eventPatterns",
+            "attachedTabs",
+            "waiting"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "behavior.get": {
+        "effects": [],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "behavior": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "raw",
+                    "human"
+                  ]
+                },
+                "beforeMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "afterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "betweenStepsMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "typingDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2000
+                },
+                "pointerSteps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "pointerDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "onUnclear": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "error"
+                  ]
+                },
+                "ttlMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000,
+                  "default": 300000
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "beforeMs",
+                "afterMs",
+                "betweenStepsMs",
+                "typingDelayMs",
+                "pointerSteps",
+                "pointerDurationMs",
+                "onUnclear",
+                "ttlMs"
+              ]
+            },
+            "expiresAt": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "behavior",
+            "expiresAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "behavior.set": {
+        "effects": [
+          "local-state"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "human"
+              ]
+            },
+            "beforeMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "afterMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "betweenStepsMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "typingDelayMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000
+            },
+            "pointerSteps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "pointerDurationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000
+            },
+            "onUnclear": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "error"
+              ]
+            },
+            "ttlMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000,
+              "default": 300000
+            },
+            "reset": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "behavior": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "raw",
+                    "human"
+                  ]
+                },
+                "beforeMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "afterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "betweenStepsMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "typingDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2000
+                },
+                "pointerSteps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "pointerDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "onUnclear": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "error"
+                  ]
+                },
+                "ttlMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000,
+                  "default": 300000
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "beforeMs",
+                "afterMs",
+                "betweenStepsMs",
+                "typingDelayMs",
+                "pointerSteps",
+                "pointerDurationMs",
+                "onUnclear",
+                "ttlMs"
+              ]
+            },
+            "expiresAt": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "behavior",
+            "expiresAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "behavior.reset": {
+        "effects": [
+          "local-state"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "behavior": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "raw",
+                    "human"
+                  ]
+                },
+                "beforeMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "afterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "betweenStepsMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "typingDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2000
+                },
+                "pointerSteps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "pointerDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 30000
+                },
+                "onUnclear": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "error"
+                  ]
+                },
+                "ttlMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 86400000,
+                  "default": 300000
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "beforeMs",
+                "afterMs",
+                "betweenStepsMs",
+                "typingDelayMs",
+                "pointerSteps",
+                "pointerDurationMs",
+                "onUnclear",
+                "ttlMs"
+              ]
+            },
+            "expiresAt": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "behavior",
+            "expiresAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "events.subscribe": {
+        "effects": [
+          "local-state"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "patterns"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "patterns"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "events.unsubscribe": {
+        "effects": [
+          "local-state"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "minItems": 0,
+              "maxItems": 100,
+              "uniqueItems": true
+            },
+            "all": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "patterns"
+              ]
+            },
+            {
+              "required": [
+                "all"
+              ],
+              "properties": {
+                "all": {
+                  "const": true
+                }
+              }
+            }
+          ]
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "patterns"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "target.list": {
+        "effects": [
+          "external-read"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "targets"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "target.attach": {
+        "effects": [
+          "external-write"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "autoAttachFrames": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "tabId"
+              ]
+            },
+            {
+              "required": [
+                "target"
+              ]
+            }
+          ]
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "attached": {
+              "const": true
+            },
+            "autoAttachFrames": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tabId",
+            "attached",
+            "autoAttachFrames"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "target.detach": {
+        "effects": [
+          "external-write"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "tabId"
+              ]
+            },
+            {
+              "required": [
+                "target"
+              ]
+            }
+          ]
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "attached": {
+              "const": false
+            }
+          },
+          "required": [
+            "tabId",
+            "attached"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "target.sessions": {
+        "effects": [
+          "external-read"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "tabId"
+              ]
+            },
+            {
+              "required": [
+                "target"
+              ]
+            }
+          ]
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "tabId",
+            "sessions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "cdp.send": {
+        "effects": [
+          "caller-dependent"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "method": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "params": {
+              "type": "object",
+              "default": {},
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "target",
+            "method"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "method": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "target",
+            "method",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "chrome.call": {
+        "effects": [
+          "caller-dependent"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "tabs.query",
+                "tabs.get",
+                "tabs.create",
+                "tabs.update",
+                "tabs.remove",
+                "tabs.reload",
+                "tabs.goBack",
+                "tabs.goForward",
+                "tabs.duplicate",
+                "windows.get",
+                "windows.getAll",
+                "windows.getCurrent",
+                "windows.getLastFocused",
+                "windows.create",
+                "windows.update",
+                "windows.remove",
+                "downloads.download",
+                "downloads.search",
+                "downloads.pause",
+                "downloads.resume",
+                "downloads.cancel",
+                "downloads.erase",
+                "downloads.removeFile",
+                "downloads.show"
+              ]
+            },
+            "args": {
+              "type": "array",
+              "items": {},
+              "minItems": 0,
+              "maxItems": 10,
+              "default": []
+            }
+          },
+          "required": [
+            "method"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "result": {}
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "input.perform": {
+        "effects": [
+          "external-write"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "move",
+                "click",
+                "type",
+                "key",
+                "scroll",
+                "drag",
+                "touch"
+              ]
+            },
+            "coordinateSpace": {
+              "const": "css-viewport-v1",
+              "default": "css-viewport-v1"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "button": {
+              "type": "string",
+              "enum": [
+                "left",
+                "middle",
+                "right"
+              ],
+              "default": "left"
+            },
+            "clickCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 1
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 12000
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "modifiers": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 15,
+              "default": 0
+            },
+            "deltaX": {
+              "type": "number",
+              "default": 0
+            },
+            "deltaY": {
+              "type": "number",
+              "default": 0
+            },
+            "from": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "target",
+            "action"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "properties": {
+                "action": {
+                  "const": "move"
+                },
+                "target": {
+                  "properties": {
+                    "sessionId": false
+                  }
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "click"
+                },
+                "target": {
+                  "properties": {
+                    "sessionId": false
+                  }
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "type"
+                },
+                "coordinateSpace": false,
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12000
+                }
+              },
+              "required": [
+                "text"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "key"
+                },
+                "coordinateSpace": false
+              },
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "scroll"
+                },
+                "target": {
+                  "properties": {
+                    "sessionId": false
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "drag"
+                },
+                "target": {
+                  "properties": {
+                    "sessionId": false
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ]
+            },
+            {
+              "properties": {
+                "action": {
+                  "const": "touch"
+                },
+                "target": {
+                  "properties": {
+                    "sessionId": false
+                  }
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            }
+          ]
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "action": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "target",
+            "action",
+            "ok"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "batch.run": {
+        "effects": [
+          "caller-dependent"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "cdp.send",
+                      "chrome.call",
+                      "input.perform",
+                      "observe.context",
+                      "sleep"
+                    ]
+                  },
+                  "params": {
+                    "type": "object",
+                    "default": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "method"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 200
+            },
+            "continueOnError": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "completed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 200
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 199
+                      },
+                      "method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "ok": {
+                        "const": true
+                      },
+                      "result": {}
+                    },
+                    "required": [
+                      "index",
+                      "method",
+                      "ok",
+                      "result"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 199
+                      },
+                      "method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "ok": {
+                        "const": false
+                      },
+                      "error": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": [
+                      "index",
+                      "method",
+                      "ok",
+                      "error"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "completed",
+            "total",
+            "results"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "observe.context": {
+        "effects": [
+          "external-read"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "maxTextChars": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 12000,
+              "default": 12000
+            },
+            "maxElements": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 500,
+              "default": 80
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "readyState": {
+              "type": "string",
+              "enum": [
+                "loading",
+                "interactive",
+                "complete"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "textTruncated": {
+              "type": "boolean"
+            },
+            "controls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "href": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "rect": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "width": {
+                        "type": "number"
+                      },
+                      "height": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "width",
+                      "height"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "tag",
+                  "text",
+                  "rect"
+                ],
+                "additionalProperties": true
+              },
+              "minItems": 0
+            },
+            "contentTruncated": {
+              "type": "boolean"
+            },
+            "untrustedPageContent": {
+              "const": true
+            }
+          },
+          "required": [
+            "target",
+            "url",
+            "title",
+            "readyState",
+            "text",
+            "textTruncated",
+            "controls",
+            "contentTruncated",
+            "untrustedPageContent"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "observe.screenshot": {
+        "effects": [
+          "external-read"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg"
+              ],
+              "default": "png"
+            },
+            "quality": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "fullPage": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "tabId"
+              ],
+              "additionalProperties": false
+            },
+            "mimeType": {
+              "type": "string",
+              "enum": [
+                "image/png",
+                "image/jpeg"
+              ]
+            },
+            "data": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 6000000
+            }
+          },
+          "required": [
+            "target",
+            "mimeType",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "instruction.resolve": {
+        "effects": [
+          "external-write"
+        ],
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "waitId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "resume",
+                "cancel"
+              ]
+            }
+          },
+          "required": [
+            "tabId",
+            "waitId",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "properties": {
+            "tabId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "waitId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "resume",
+                "cancel"
+              ]
+            },
+            "waiting": {
+              "const": false
+            }
+          },
+          "required": [
+            "tabId",
+            "waitId",
+            "action",
+            "waiting"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

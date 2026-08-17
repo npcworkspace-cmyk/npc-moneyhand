@@ -1,0 +1,130 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to release; defaults to v<package version>
+        required: false
+        type: string
+      publish:
+        description: Publish a GitHub Release after every check passes
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      release-tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Validate release identity
+        id: identity
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          expected="v${version}"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            requested="${GITHUB_REF_NAME}"
+          else
+            if [[ "${PUBLISH_REQUESTED}" == "true" && -z "${REQUESTED_TAG}" ]]; then
+              echo "Manual publishing requires an explicit existing release_tag." >&2
+              exit 1
+            fi
+            requested="${REQUESTED_TAG:-$expected}"
+          fi
+          if [[ "$requested" != "$expected" ]]; then
+            echo "Release tag '$requested' must match package version '$expected'." >&2
+            exit 1
+          fi
+          echo "tag=$requested" >> "$GITHUB_OUTPUT"
+      - name: Run repository checks
+        run: npm run check
+      - name: Build and conformance-test release artifacts
+        run: npm run release:pack
+      - name: Upload the complete unpacked release directory
+        uses: actions/upload-artifact@v7
+        with:
+          name: npc-moneyhand-release
+          path: artifacts/agent-release
+          if-no-files-found: error
+
+  supported-agent-conformance:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Download the exact release artifacts built on Linux
+        uses: actions/download-artifact@v8
+        with:
+          name: npc-moneyhand-release
+          path: artifacts/agent-release
+      - name: Drive the exact MoneyHand Skill tarball
+        run: >-
+          node scripts/packaged-agent-conformance.mjs
+          --release-dir artifacts/agent-release
+          --require-all
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish == true
+    needs: [build, supported-agent-conformance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: npc-moneyhand-release
+          path: artifacts/agent-release
+      - name: Verify and publish immutable release assets
+        shell: bash
+        working-directory: artifacts/agent-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sha256sum --check SHA256SUMS.txt
+          assets=(release-manifest.json SHA256SUMS.txt)
+          while IFS= read -r -d '' asset; do
+            assets+=("$asset")
+          done < <(find . -maxdepth 1 -type f \( -name '*.tgz' -o -name '*.zip' \) -print0 | sort -z)
+          flags=(--verify-tag --title "$RELEASE_TAG" --generate-notes)
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" "${flags[@]}"
