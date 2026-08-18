@@ -7,7 +7,7 @@
 
 body {
   margin: 0;
-  min-width: 300px;
+  min-width: 286px;
 }
 
 main {
@@ -54,43 +54,19 @@ p {
   color: #c4322b;
 }
 
-form {
-  margin: 0;
-}
-
-.endpoint {
+.connection {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 5px;
 }
 
-input {
-  box-sizing: border-box;
-  min-width: 0;
-  border: 1px solid #cbd2df;
-  border-radius: 7px;
-  padding: 7px 8px;
+#endpoint {
+  border-radius: 6px;
+  padding: 6px 7px;
   font: 12px/1.2 "Cascadia Mono", Consolas, monospace;
-  background: white;
-  outline: none;
-}
-
-#address {
-  flex: 1 1 auto;
-}
-
-#port {
-  width: 64px;
-}
-
-input:focus {
-  border-color: #356be0;
-  box-shadow: 0 0 0 2px #dce7ff;
-}
-
-.separator {
-  color: #667085;
-  font-weight: 700;
+  color: #344054;
+  background: #f2f4f7;
 }
 
 button {
@@ -109,12 +85,9 @@ button:disabled {
   opacity: .65;
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  clip-path: inset(50%);
+.hint {
+  margin-top: 8px;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.3;
 }

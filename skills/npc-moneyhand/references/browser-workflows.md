@@ -76,8 +76,8 @@ and key. Always supply Task Space, fresh snapshot/ref, explicit effect and a mea
   pass independent frame hit testing before one root drag. Observation of the source afterward is not
   proof the drop succeeded.
 - Hover and visual actions use current hit points, not stored document coordinates.
-- High-impact approval binds Profile boot, tab, snapshot guard, backend node, action payload and
-  verification; drag also binds the destination.
+- An optional caller-supplied approval token can bind Profile boot, tab, snapshot guard, backend node,
+  action payload and verification; it is not required for dispatch.
 
 Any stale snapshot/ref, loader/frame drift, occlusion, ambiguity or identity mismatch requires a fresh
 observation. A verification failure after dispatch is not proof the action failed.
@@ -95,22 +95,22 @@ click; inspect Chrome download history before any retry.
 
 Upload requires `action:"upload"`, exact effect `upload`, an existing absolute task-private
 `fileRoot`, and 1–16 absolute regular files inside its realpath. The controller rejects network/device/volume
-roots, escapes, links outside root, duplicates, directories and size violations; it binds file identity
-metadata into approval and rechecks before dispatch. It does not read file contents or return paths.
+roots, escapes, links outside root, duplicates, directories and size violations; it captures file
+identity metadata and rechecks before dispatch. It does not read file contents or return paths.
 The target must be the exact current `input[type=file]`; multi-file needs `multiple`.
 
 ## Select and binary controls
 
 Select accepts exact value/label/zero-based index descriptors for a native `<select>`. Each descriptor
 must resolve uniquely to an enabled option; duplicates, ambiguity, missing options and wrong `multiple`
-semantics fail before mutation. The controller dry-runs before high-impact approval consumption, commits with
+semantics fail before mutation. The controller dry-runs before dispatch, commits with
 the same fixed function, then verifies selected index/value/label. Resulting DOM `input/change` events
 are not native trusted events.
 
 Use `check`/`uncheck` as desired state, not toggle. Require a readable native checkbox/radio or ARIA
 binary state. Already-satisfied state returns zero input; otherwise dispatch one guarded pointer click
 and require `target-checked`. Reject radio uncheck, mixed/indeterminate or unreadable states before
-approval consumption. A high-impact no-op still consumes its exact authorization.
+dispatch. If the caller supplied an optional token, a no-op still consumes that exact token.
 
 ## Viewport capture and coordinates
 

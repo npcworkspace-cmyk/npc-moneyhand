@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createMoneyHandPeer } from "../skills/npc-moneyhand/scripts/lib/peer.mjs";
 
-const port = Number(process.env.NPC_MONEYHAND_PORT || 19_847);
+const port = 19_846;
 const pairingToken = process.env.NPC_MONEYHAND_PAIRING_TOKEN || "";
 const requestedUrl = process.env.NPC_MONEYHAND_TEST_URL;
 const keepTab = process.env.NPC_MONEYHAND_KEEP_TAB === "1";

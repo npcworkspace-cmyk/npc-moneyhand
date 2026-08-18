@@ -2557,7 +2557,7 @@ test("actSemanticLocator pins the Task Space before its first snapshot and close
   assert.equal(moneyhand.status().semanticSnapshots.length, 0);
 });
 
-test("actSemanticLocator refuses high impact and failed waits before any ref action", async (t) => {
+test("actSemanticLocator sends high-impact intent through the same guarded locator path", async (t) => {
   const moneyhand = await startMoneyHand(t);
   await connectExtension(moneyhand, t);
   await moneyhand.createTaskSpace({ id: "semantic-locator-closed", tabIds: [42] });
@@ -2589,10 +2589,10 @@ test("actSemanticLocator refuses high impact and failed waits before any ref act
 
   await assert.rejects(
     moneyhand.actSemanticLocator({ ...common, effect: "send" }),
-    (error) => error.code === "SEMANTIC_LOCATOR_APPROVAL_PATH_REQUIRED"
+    (error) => error.code === "SEMANTIC_LOCATOR_NOT_READY"
       && error.details.actionDispatched === false,
   );
-  assert.equal(waits, 0);
+  assert.equal(waits, 1);
   assert.equal(actions, 0);
 
   await assert.rejects(
@@ -2607,7 +2607,7 @@ test("actSemanticLocator refuses high impact and failed waits before any ref act
     }),
     (error) => error.code === "TASK_SPACE_SELECTOR_OWNED",
   );
-  assert.equal(waits, 0);
+  assert.equal(waits, 1);
   assert.equal(actions, 0);
 
   await assert.rejects(
@@ -2616,7 +2616,7 @@ test("actSemanticLocator refuses high impact and failed waits before any ref act
       && error.details.actionDispatched === false
       && error.details.timedOut === true,
   );
-  assert.equal(waits, 1);
+  assert.equal(waits, 2);
   assert.equal(actions, 0);
   assert.deepEqual(waitOptions.selector, {
     profile: "npc-instance_0001",
@@ -4767,17 +4767,13 @@ test("JSONL exposes the guarded semantic ref action loop without Agent-side CDP 
 
   input.write(`${JSON.stringify({
     id: "semantic-jsonl-locator-high-impact",
-    op: "actSemanticLocator",
-    taskSpaceId: "semantic-jsonl-space",
-    tabId: 42,
-    locator: { kind: "role", role: "button", name: "Continue" },
-    action: "click",
-    effect: "send",
+    op: "routeSurface",
+    surface: "web-page",
+    risk: "send",
   })}\n`);
   const highImpactLocator = await result("semantic-jsonl-locator-high-impact");
-  assert.equal(highImpactLocator.ok, false);
-  assert.equal(highImpactLocator.error.code, "SEMANTIC_LOCATOR_APPROVAL_PATH_REQUIRED");
-  assert.equal(highImpactLocator.error.details.actionDispatched, false);
+  assert.equal(highImpactLocator.ok, true);
+  assert.equal(highImpactLocator.value.backend, "moneyhand");
 
   input.write(`${JSON.stringify({
     id: "semantic-jsonl-capture",
@@ -4990,7 +4986,7 @@ test("MoneyHand keeps versioned non-executable site learnings outside MoneyHand"
   assert.equal(moneyhand.removeSiteLearning({ learningId: "example-orders" }).changed, true);
 });
 
-test("high-impact Task Space requests consume one request-bound user approval", async (t) => {
+test("high-impact Task Space requests dispatch directly and optionally consume a supplied token", async (t) => {
   const moneyhand = await startMoneyHand(t);
   const { client } = await connectExtension(moneyhand, t);
   await moneyhand.createTaskSpace({ id: "publish-review", tabIds: [42] });
@@ -5005,10 +5001,10 @@ test("high-impact Task Space requests consume one request-bound user approval", 
     },
   };
 
-  await assert.rejects(
-    moneyhand.taskRequest({ id: "publish-review", effect: "publish", request }),
-    (error) => error.code === "TASK_APPROVAL_REQUIRED",
-  );
+  const direct = moneyhand.taskRequest({ id: "publish-review", effect: "publish", request });
+  let handRequest = await client.nextJson();
+  respond(client, handRequest, { ok: true, result: { dispatched: true } });
+  assert.equal((await direct).ok, true);
   const approval = moneyhand.approveTaskEffect({
     taskSpaceId: "publish-review",
     effect: "publish",
@@ -5026,7 +5022,7 @@ test("high-impact Task Space requests consume one request-bound user approval", 
     approvalToken: approval.token,
     request,
   });
-  const handRequest = await client.nextJson();
+  handRequest = await client.nextJson();
   respond(client, handRequest, { ok: true, result: { dispatched: true } });
   assert.equal((await pending).ok, true);
   await assert.rejects(
@@ -5089,7 +5085,7 @@ test("surface routing keeps browser work in MoneyHand and sends browser boundari
   assert.equal(moneyhand.routeSurface({ surface: "password-prompt" }).mode, "human-takeover");
   assert.equal(moneyhand.routeSurface({ surface: "security-confirmation" }).mode, "human-takeover");
 
-  assert.equal(moneyhand.routeSurface({ surface: "web-page", risk: "payment" }).backend, "human");
+  assert.equal(moneyhand.routeSurface({ surface: "web-page", risk: "payment" }).backend, "moneyhand");
   assert.equal(moneyhand.routeSurface({
     surface: "web-page",
     risk: "payment",

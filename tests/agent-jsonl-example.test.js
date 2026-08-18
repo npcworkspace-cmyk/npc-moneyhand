@@ -26,7 +26,7 @@ test("minimal Python adapter completes descriptor-driven Hand lifecycle", (t) =>
     "--",
     process.execPath,
     "skills/npc-moneyhand/scripts/moneyhand.mjs",
-    "--port",
+    "--internal-test-port",
     "0",
   ], {
     cwd: new URL("..", import.meta.url),
@@ -60,7 +60,7 @@ test("minimal Python adapter gracefully stops after a failed product command", (
     "--",
     process.execPath,
     "skills/npc-moneyhand/scripts/moneyhand.mjs",
-    "--port",
+    "--internal-test-port",
     "0",
   ], {
     cwd: new URL("..", import.meta.url),

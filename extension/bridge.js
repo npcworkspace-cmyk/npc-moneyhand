@@ -2,7 +2,7 @@ import { MoneyHandExecutor } from "./executor.js";
 import {
   DEFAULT_ENDPOINT, INPUT_COORDINATE_SPACE, MAX_FOCUS_FUTURE_MS, MAX_MESSAGE_BYTES, MAX_QUEUE_DEPTH,
   MAX_SCREENSHOT_BYTES, MAX_UNKNOWN_OUTCOME_IDS, MoneyHandError, PRODUCT,
-  PROTOCOL, PROTOCOL_VERSION, endpointFromAddressPort, endpointIsAllowed,
+  PROTOCOL, PROTOCOL_VERSION, endpointIsAllowed,
   errorMessage, needInstructionMessage, pairingTokenIsValid, parseRequest,
   parseWireMessage, requestIdIsValid, responseMessage,
 } from "./protocol.js";
@@ -213,16 +213,27 @@ export class MoneyHandBridge {
   async start() {
     this.attachChromeListeners();
     await this.restoreRuntimeState();
+    await this.ensureDefaultConnectionSettings();
     return await this.connect();
   }
 
   async storedSettings() {
     return await this.chrome.storage.local.get({
-      enabled: false,
+      enabled: true,
       wsEndpoint: DEFAULT_ENDPOINT,
       authToken: "",
       instanceId: "",
     });
+  }
+
+  async ensureDefaultConnectionSettings() {
+    const settings = await this.storedSettings();
+    const patch = {};
+    if (settings.enabled !== true) patch.enabled = true;
+    if (settings.wsEndpoint !== DEFAULT_ENDPOINT) patch.wsEndpoint = DEFAULT_ENDPOINT;
+    if (settings.profileAlias) patch.profileAlias = "";
+    if (Object.keys(patch).length) await this.chrome.storage.local.set(patch);
+    return { ...settings, ...patch };
   }
 
   runtimeStorage() {
@@ -1107,14 +1118,10 @@ export class MoneyHandBridge {
     return await this.connect();
   }
 
-  async configure(params) {
-    const wsEndpoint = endpointFromAddressPort(params?.address, params?.port);
-    const authToken = params?.authToken ?? (await this.storedSettings()).authToken ?? "";
-    if (!pairingTokenIsValid(authToken)) throw new MoneyHandError("INVALID_ARGUMENT", "authToken must be empty or contain 16-512 characters");
+  async connectDefault() {
     await this.chrome.storage.local.set({
       enabled: true,
-      wsEndpoint,
-      authToken,
+      wsEndpoint: DEFAULT_ENDPOINT,
       profileAlias: "",
     });
     return await this.reconnect();

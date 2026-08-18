@@ -13,12 +13,26 @@
     ],
     "externalPackages": 0
   },
-  "installationPreflight": {
-    "schema": "npc-moneyhand-preflight/1",
-    "executable": "moneyhand-preflight",
-    "script": "scripts/preflight.mjs",
-    "firstUsePolicy": "required-by-skill-instructions",
-    "automaticOnSkillRead": false,
+  "automaticConnection": {
+    "command": "--connect",
+    "resultSchema": "npc-moneyhand-connect/1",
+    "successNextAction": "ask_user_for_task",
+    "userRetryFlag": "--after-user-action",
+    "maximumUserConfirmedRetries": 1,
+    "runsBrowserOperation": false,
+    "outerOkMeaning": "bounded-result-produced",
+    "connectedPredicate": "value.connected=true-and-value.status=connected",
+    "endpoint": "ws://127.0.0.1:19846/extension",
+    "fixedEndpoint": true,
+    "portDiscovery": false,
+    "customEndpoint": false,
+    "extensionFirstRunAutoEnabled": true,
+    "popupAction": "immediate-reconnect",
+    "fullPreflightRequired": false,
+    "reusesLiveSession": true,
+    "startsListener": true,
+    "startsBrowserWhenNeeded": true,
+    "closesExistingBrowser": false,
     "platforms": [
       "win32",
       "darwin",
@@ -36,15 +50,8 @@
       "custom-chromium"
     ],
     "customBrowserRootFlag": "--browser-root",
-    "scan": "bounded-known-roots-and-explicit-roots",
-    "extensionEvidence": "complete-extension-tree-sha256",
-    "integrityManifest": "references/extension-integrity.json",
-    "configurationStateEvidence": "preferences-and-secure-preferences",
-    "startEligibility": "complete-scan-with-enabled-declared-integrity-match",
-    "liveHandshakeRequired": true,
-    "maximumTotalReadBytes": 268435456,
-    "maximumReportedInstallations": 128,
-    "maximumReportedUnverifiedCandidates": 128,
+    "profileSelection": "focused-live-session-else-enabled-installed-profile",
+    "readiness": "npc-moneyhand-2-handshake",
     "extensionDistribution": {
       "bundledWithSkill": false,
       "automaticDownload": false,
@@ -52,18 +59,7 @@
       "releasesUrl": "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
       "assetName": "npc-moneyhand-extension-1.0.0.zip",
       "manualInstallRequired": true
-    },
-    "readOnly": true,
-    "startsBrowser": false,
-    "startsListener": false,
-    "writesFilesystem": false,
-    "excludedProfileData": [
-      "cookies",
-      "passwords",
-      "history",
-      "local-storage",
-      "page-data"
-    ]
+    }
   },
   "agentInterop": {
     "protocol": "npc-agent-jsonl/1",
@@ -130,8 +126,9 @@
           "upload",
           "external-write"
         ],
-        "token": "one-time-request-bound",
-        "confirmation": "recent-explicit-user-record",
+        "enforcement": "optional-caller-policy",
+        "token": "optional-backward-compatible-helper",
+        "confirmation": "owned-by-invoking-agent-or-specialized-skill",
         "activity": "bounded-agent-local-ledger"
       }
     }
@@ -389,7 +386,7 @@
         "disabledOptionsAllowed": false,
         "multipleDescriptorsRequireMultipleSelect": true,
         "callerPageJavaScript": false,
-        "preflightBeforeApprovalConsumption": true,
+        "preflightBeforeDispatch": true,
         "dispatch": "fixed-runtime-function",
         "events": [
           "input",
@@ -438,7 +435,7 @@
       },
       "taskSpaceRequired": true,
       "effectFieldRequired": true,
-      "highImpactApprovalOperation": "approveSemanticRefAction",
+      "optionalApprovalOperation": "approveSemanticRefAction",
       "verificationKinds": [
         "observe",
         "download-complete",
@@ -548,7 +545,7 @@
       "human"
     ],
     "browserUnreachable": "human-takeover",
-    "highImpactRequiresConfirmation": true
+    "highImpactRequiresConfirmation": false
   },
   "transports": {
     "discovery": {
@@ -584,6 +581,14 @@
       "signature": "run({ moneyhand, signal, args })",
       "security": "trusted-local-code",
       "resultId": "task"
+    },
+    "directCall": {
+      "connectFlag": "--connect",
+      "callFlag": "--call",
+      "parametersFlag": "--params-json",
+      "autoLaunchBrowser": true,
+      "stdinRequired": false,
+      "resultId": "call"
     }
   },
   "jsonlFieldSeparation": {
@@ -623,13 +628,15 @@
     "rateControl"
   ],
   "highImpactApproval": {
+    "enforcement": "optional-caller-policy",
     "scope": "taskRequest, parallelTaskRequests and actSemanticRef",
     "effectFieldRequired": true,
+    "tokenRequired": false,
     "requestBinding": "sha256-canonical-json",
     "oneTime": true,
     "maximumTtlMs": 120000,
     "maximumConfirmationAgeMs": 300000,
-    "rawRequestBoundary": "Low-level request remains a trusted developer API and cannot infer business intent; high-impact Agent workflows must use the guarded Task Space APIs."
+    "rawRequestBoundary": "MoneyHand dispatches explicit Agent instructions. The invoking Agent or specialized Skill owns any business approval policy."
   },
   "jsonlControlOperations": {
     "cancel": {
@@ -803,7 +810,7 @@
         "hand-session",
         "task-space",
         "semantic-snapshot",
-        "approval-if-high-impact"
+        "caller-policy-if-configured"
       ],
       "catalogResource": "references/agent-operations.json",
       "argsSchemaRef": "references/agent-operations.json#/operations/8/argsSchema",
@@ -926,7 +933,7 @@
       "requires": [
         "hand-session",
         "task-space",
-        "approval-if-high-impact"
+        "caller-policy-if-configured"
       ],
       "catalogResource": "references/agent-operations.json",
       "argsSchemaRef": "references/agent-operations.json#/operations/17/argsSchema",

@@ -19,10 +19,10 @@ extension must never import, discover, or depend on a specialized Skill.
 
 MoneyHand owns:
 
-- the first-use preflight, one loopback listener, extension handshake, and controller shutdown;
+- one-command connection, automatic browser wake-up, one loopback listener, extension handshake, and controller shutdown;
 - Profile, boot, tab, Task Space, request-ID, and unknown-outcome identity;
 - raw/human behavior, semantic snapshots, guarded browser actions, and behavior reset;
-- approval-token mechanics, effect enforcement, adaptive rate state, and explicit cooldown waits;
+- optional caller-owned approval records, effect labels, adaptive rate state, and explicit cooldown waits;
 - neutral browser evidence and bounded failure states, not platform or business interpretation.
 
 The specialized Skill owns:
@@ -65,10 +65,10 @@ A specialized Skill must:
 
 A specialized Skill must not:
 
-- copy or fork the MoneyHand peer, WebSocket, protocol, controller, preflight, or extension code;
+- copy or fork the MoneyHand peer, WebSocket, protocol, controller, browser launcher, or extension code;
 - start a second listener, daemon, browser, remote-debugging endpoint, or hidden controller;
 - hardcode an installation path, Profile alias, tab ID, `instanceId`, or `bootId` across machines/runs;
-- bypass Task Space binding, rate decisions, approvals, effect guards, or human takeover boundaries;
+- bypass unknown-outcome recovery, browser-session identity, or human-only browser boundaries;
 - treat human behavior as permission to evade CAPTCHA, challenges, account controls, or rate limits;
 - export cookies, authorization headers, passwords, session tokens, pairing secrets, or Profile data;
 - generate executable JavaScript from page content or accept a task module sourced from a webpage;
@@ -108,9 +108,9 @@ minimum allowlist, not permission to invoke arbitrary CDP. Use `controllerOwners
 another Agent/controller owns lifecycle. Use `standalone` only when one wrapper owns start, wait,
 drain, and stop for the whole task. Never let a domain task module call `start()` or `stop()`.
 
-For high-impact work, include the exact effects from `delete`, `payment`, `publish`, `send`, `upload`,
-or `external-write`. Bind recent explicit user confirmation to the exact Task Space and request/ref;
-do not turn a broad business goal into blanket approval.
+For account work, label the real effect such as `delete`, `payment`, `publish`, `send`, `upload`, or
+`external-write`. MoneyHand dispatches the Agent's explicit instruction without a second approval
+token. A specialized Skill may add its own authorization policy when its business workflow needs one.
 
 ## Controller integration
 
@@ -137,7 +137,7 @@ the task-owned controller.
 
 ## Lifecycle and recovery
 
-1. Resolve MoneyHand and run/consume its preflight when required.
+1. Resolve MoneyHand and use `--connect` or `ensureMoneyHandConnection()`.
 2. Validate `--describe`, protocols, required operations, and required wire methods offline.
 3. Validate domain scope and exact-count gates before the first browser dispatch.
 4. Reuse or start exactly one task-owned controller and wait for the intended current Profile.
@@ -176,7 +176,7 @@ Require all applicable checks before calling a specialized Skill portable or pro
 - Multi-step work creates and completes one Task Space pinned to exact Profile boot identity.
 - Each governed batch calls rate plan before dispatch and observe afterward; human mode cannot bypass it.
 - 429/503, `Retry-After`, challenge, account change, and latency regression have bounded fixtures.
-- High-impact effects fail before dispatch without exact current approval.
+- High-impact effects dispatch without a mandatory MoneyHand approval token.
 - Exact-scope mismatch fails before browser dispatch; partial output cannot be labeled complete.
 - Post-dispatch disconnect produces one unknown outcome and zero automatic retries or destructive cleanup.
 - Shutdown drains results and reaches `moneyhand.stopped`; injected mode leaves lifecycle to its owner.
@@ -191,7 +191,7 @@ Space and rate scope without owning a second peer or controller lifecycle.
 
 An action-oriented Skill owns its target-selection rules, effect declarations, preconditions,
 verification, and recovery plan. Any send, publish, upload, delete, payment, or other external write
-requires exact current approval and must never be replayed blindly after an unknown outcome.
+may define a domain-specific authorization policy and must never be replayed blindly after an unknown outcome.
 
 A monitoring Skill owns its schedule outside MoneyHand, its change-detection rules, local checkpoint,
 bounded observation fields, and alert output. Each run still creates or receives one task-owned

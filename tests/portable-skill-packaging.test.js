@@ -371,29 +371,7 @@ test("portable Skill ZIP is deterministic, complete and runnable from special pa
   assert.equal(descriptor.schema, "npc-agent-cli-descriptor/1");
   assert.equal(descriptor.product?.package, "npc-moneyhand");
 
-  const preflight = join(unpacked, "scripts", "preflight.mjs");
-  try {
-    await access(preflight);
-    const { stdout: preflightOutput } = await run(process.execPath, [preflight, "--json"], {
-      cwd: unpacked,
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 30_000,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    const report = JSON.parse(preflightOutput);
-    assert.equal(report.schema, "npc-moneyhand-preflight/1");
-    assert.deepEqual(report.skill?.extensionAcquisition, {
-      bundled: false,
-      automaticDownload: false,
-      manualInstallRequired: true,
-      repositoryUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand",
-      releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-      assetName: "npc-moneyhand-extension-1.0.0.zip",
-    });
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
+  await assert.rejects(access(join(unpacked, "scripts", "preflight.mjs")), { code: "ENOENT" });
 
   for (const file of built.manifest.files) {
     assert.equal(await hash(safeArchivePath(extraction, file.path)), file.sha256, file.path);

@@ -55,7 +55,7 @@ Agent /专项 Skill
 - 只有 iframe/OOPIF 任务才启用 frame-aware 观察；
 - 大结果写到受控本地 artifact，只在 JSONL 返回元数据和路径引用。
 
-批处理不能绕过 effect、审批、unknown-outcome 或 rate-control 约束。
+批处理可直接执行账号动作，不受 MoneyHand 二次审批门禁。调用方仍应正确标记 effect，并在启用 rate-control 时处理 unknown-outcome 与限流状态。
 
 这里的 rate-control 约束由调用批处理的 Agent/专项 Skill 显式执行；低层 `request()` 不会自动
 推导 scope 或拦截请求。性能测试必须记录是否所有受控批次都经过 plan/decision/observe。

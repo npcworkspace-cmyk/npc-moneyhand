@@ -15,11 +15,11 @@
 
 1. Skill 与 Extension 必须精确声明 wire `npc-moneyhand/2`。
 2. Agent adapter 必须发现 control `npc-moneyhand-control/1`、`args` envelope、startup/stopped event 和 operation catalog。
-3. `127.0.0.1` 与 `::1` 是不同 listener；Extension 保存的 host 必须匹配控制台。
+3. Skill 与 Extension 都使用固定 `ws://127.0.0.1:19846/extension`，不协商或扫描端口。
 4. `instanceId + bootId` 只固定当前 Profile boot。Extension reload、Chrome restart 或 Profile 替换后重新建 Task Space。
-5. semantic snapshot/ref、审批令牌和 unknown-outcome ACK 不跨 boot 复用。
+5. semantic snapshot/ref、可选决策记录令牌和 unknown-outcome ACK 不跨 boot 复用。
 6. descriptor/catalog 不匹配时 fail closed；不要用旧字段继续写操作。
-7. 一个端口只属于一个 Agent 任务，不支持多个独立 controller 竞争同一端口。
+7. 固定端口 `19846` 只属于一个 Agent 任务，不支持多个独立 controller 竞争。
 8. 页面外表面只支持 human takeover，不因操作系统不同而自动添加本地输入后端。
 
 ## 平台边界
@@ -86,7 +86,7 @@ node scripts/install-skill.mjs --action rollback --mode copy --target "<skills-d
 1. 停止 controller；
 2. 切到准确 commit/tag 或独立 worktree；
 3. 在 `chrome://extensions` reload 对应 `extension`；
-4. 核对显示版本和保存的 loopback endpoint；
+4. 核对显示版本和固定 loopback endpoint；
 5. 启动匹配 Skill；
 6. 先只读验证。
 
@@ -98,7 +98,7 @@ node scripts/install-skill.mjs --action rollback --mode copy --target "<skills-d
 
 - 所需 control/wire protocol；
 - 所需 operation 和 Extension method；
-- effect 与审批要求；
+- effect 与调用方自定义的授权策略（如有）；
 - rate scope、stop signals、checkpoint 版本；
 - 输出 schema。
 
@@ -112,6 +112,6 @@ node scripts/install-skill.mjs --action rollback --mode copy --target "<skills-d
 - 能否持续 drain UTF-8 stdout 并写 stdin；
 - 能否访问 loopback；
 - 能否在任务结束回收进程；
-- 能否把高影响确认和结果未知反馈给用户。
+- 能否把结果未知反馈给 Agent，并在重试前核查真实状态。
 
 只有远程 MCP/聊天、无法访问本机进程或 Chrome Extension 的宿主，需要自己的受控本地适配层；本项目不会为此恢复常驻 daemon。

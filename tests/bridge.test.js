@@ -338,7 +338,7 @@ test("pairing uses mutual HMAC without sending the raw secret", async (t) => {
   assert.equal(socket.sent.some((message) => JSON.stringify(message).includes("pair-secret-123456")), false);
 });
 
-test("saving the simple endpoint preserves an independently provisioned pairing secret", async (t) => {
+test("reconnecting to the fixed endpoint preserves an independently provisioned pairing secret", async (t) => {
   FakeWebSocket.reset();
   const fake = createFakeChrome();
   await fake.chrome.storage.local.set({
@@ -353,12 +353,12 @@ test("saving the simple endpoint preserves an independently provisioned pairing 
     bootId: "boot_pairing_config",
   });
   t.after(() => bridge.stop());
-  await bridge.configure({ address: "127.0.0.1", port: 19847 });
+  await bridge.connectDefault();
   const stored = await fake.chrome.storage.local.get({
     wsEndpoint: "",
     authToken: "",
   });
-  assert.equal(stored.wsEndpoint, "ws://127.0.0.1:19847/extension");
+  assert.equal(stored.wsEndpoint, "ws://127.0.0.1:19846/extension");
   assert.equal(stored.authToken, "pair-secret-123456");
 });
 

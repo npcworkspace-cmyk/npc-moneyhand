@@ -6,7 +6,7 @@ stored in the Chrome extension.
 ## Contents
 
 - [Versioned site learnings](#versioned-site-learnings)
-- [One-time high-impact approval](#one-time-high-impact-approval)
+- [Optional one-time high-impact approval](#optional-one-time-high-impact-approval)
 
 ## Versioned site learnings
 
@@ -45,11 +45,12 @@ JSONL keeps `learning` inside the canonical `args` object so its correlation id 
 {"id":"cmd-learn-1","op":"registerSiteLearning","args":{"learning":{"id":"example-orders","revision":2,"match":{"hosts":["app.example.com"],"pathPrefixes":["/orders"]},"hints":[{"kind":"verification","text":"Re-read the order id."}]}}}
 ```
 
-## One-time high-impact approval
+## Optional one-time high-impact approval
 
-For `delete`, `payment`, `publish`, `send`, `upload`, or `external-write`, use Task Space APIs.
-First bind a recent explicit user confirmation to the exact Task Space, effect, and canonical
-request:
+MoneyHand does not require a controller approval token for `delete`, `payment`, `publish`, `send`,
+`upload`, or `external-write`. The invoking Agent or specialized Skill owns authorization policy.
+Callers that want an additional local audit ledger may optionally bind their own confirmation to the
+exact Task Space, effect, and canonical request:
 
 ```js
 const approval = moneyhand.approveTaskEffect({
@@ -75,10 +76,10 @@ The token is one-time, expires within at most two minutes, and is revoked on a b
 `listApprovalActivity()` returns a bounded local ledger containing approval ids, effects, request
 digests, and issue/consume/reject/expire events, but never the token or user confirmation text.
 
-The low-level `request()` API deliberately exposes raw trusted-developer control and cannot infer
-business intent from CDP. Any Agent workflow that may cause a high-impact external effect must use
-the guarded Task Space path. Every Task Space request must declare an effect, including
-`read-only`. For JSONL, keep `id` as a fresh correlation id and put the reusable
+Omit `approvalToken` to dispatch directly. If a token is supplied, MoneyHand validates and consumes
+it for backward compatibility. The low-level `request()` API exposes the same direct execution
+model. Every Task Space request still declares an effect, including `read-only`, so logs and
+specialized Skills can classify intent. For JSONL, keep `id` as a fresh correlation id and put the reusable
 identity in `args.taskSpaceId`:
 
 ```json

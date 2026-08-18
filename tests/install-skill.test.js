@@ -87,7 +87,7 @@ test("copy install is standalone in a path with spaces, Unicode, #, and %", asyn
 
   const cli = await invokeWithInput(
     join(destination, "scripts", "moneyhand.mjs"),
-    ["--once", "--port", "0"],
+    ["--once", "--internal-test-port", "0"],
     `${JSON.stringify({ id: "unicode-op", op: "状态" })}\n`,
   );
   assert.equal(cli.code, 0, cli.stderr);

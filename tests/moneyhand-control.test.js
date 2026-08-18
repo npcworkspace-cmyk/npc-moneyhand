@@ -192,7 +192,7 @@ test("MoneyHand task modules run many calls in one trusted local code pass", asy
 
 test("public MoneyHand CLI starts its listener without browser input", async () => {
   const script = resolve("skills/npc-moneyhand/scripts/moneyhand.mjs");
-  const child = spawn(process.execPath, [script, "--once", "--port", "0"], {
+  const child = spawn(process.execPath, [script, "--once", "--internal-test-port", "0"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -243,7 +243,7 @@ test("MoneyHand CLI cannot strand its listener behind unread Windows stdout", {
   const script = resolve("skills/npc-moneyhand/scripts/moneyhand.mjs");
   const child = spawn(process.execPath, [
     script,
-    "--port",
+    "--internal-test-port",
     "0",
     "--output-drain-timeout-ms",
     "50",

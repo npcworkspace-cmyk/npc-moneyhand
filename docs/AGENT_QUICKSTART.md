@@ -1,163 +1,57 @@
 # Agent 快速开始
 
-本页给第一次接入 `npc-moneyhand` 的 Agent。产品只有 `skills/npc-moneyhand` Skill 和 `extension` Chrome 扩展；Skill 内的 `moneyhand` 控制台随任务启停。
+本页只定义首次安装和连接。不要在连接成功前研究协议、生成控制脚本或执行网页任务。
 
-## 1. 前提
+要求：本机 Node.js 20+、Chromium 125+；不需要 `npm install`，不安装 daemon。
 
-- 桌面 Chrome/Chromium 125+；
-- Node.js 20+；
-- Extension 与 Agent 进程在同一台电脑；
-- 一个 Agent 任务独占一个 loopback 端口；
-- 不需要 `npm install`，不需要 daemon。
+## 1. 安装基础 Skill
 
-先在目标 Chrome Profile 中加载仓库的 `extension` 目录。首次打开弹窗，保存 `127.0.0.1:19846`。路径固定为 `/extension`。
+通过当前 Agent 宿主公开的本地 Skill 导入方式安装完整的 `skills/npc-moneyhand` 目录。不要
+扫描电脑猜测未知的 Skill 路径。WorkBuddy 使用其本地 Skill 导入界面。
 
-## 2. 离线发现
+Skill 不包含 Extension。未安装时由用户从项目 Releases 下载并解压
+`npc-moneyhand-extension-1.0.0.zip`，再通过 Chromium 扩展管理页加载。
 
-在仓库根目录执行：
+## 2. 执行唯一连接命令
 
-~~~text
-node skills/npc-moneyhand/scripts/moneyhand.mjs --describe
-~~~
-
-必须只得到一行 `npc-agent-cli-descriptor/1`，并确认：
-
-- package：`npc-moneyhand`；
-- version：`1.0.0`；
-- control protocol：`npc-moneyhand-control/1`；
-- wire protocol：`npc-moneyhand/2`；
-- executable：`moneyhand`；
-- startup/stopped：`moneyhand.listening` / `moneyhand.stopped`。
-
-`--describe` 不绑定端口、不等待 Chrome、不消费 stdin。适配器应以实际输出和 [operation catalog](../skills/npc-moneyhand/references/agent-operations.json) 为准，不要从文档猜字段。
-
-## 3. 启动一个任务期控制台
+在基础 Skill 目录执行一次：
 
 ~~~text
-node skills/npc-moneyhand/scripts/moneyhand.mjs --host 127.0.0.1 --port 19846
+node scripts/moneyhand.mjs --connect
 ~~~
 
-第一条 stdout 事件是 `moneyhand.listening`。持续读取 stdout；不要等进程退出后才读。扩展会主动重连，控制台不会启动 Chrome。
+命令会返回一个 `npc-moneyhand-connect/1` 结果。只执行其中的 `nextAction`：
 
-发送 UTF-8 JSONL：
+外层 `ok: true` 只表示命令成功返回了有界结果。只有 `value.connected: true` 且
+`value.status: connected` 才表示 MoneyHand 已连接。
 
-~~~json
-{"id":"cap-1","op":"capabilities","args":{}}
-{"id":"wait-1","op":"wait","args":{"timeoutMs":60000}}
-{"id":"status-1","op":"status","args":{}}
+| 结果 | Agent 行为 |
+| --- | --- |
+| `connected` | 转述 `userMessage`，询问用户要做什么，然后等待。 |
+| `install_extension` | 转述 `userMessage`，等待用户安装并确认。 |
+| `open_browser_and_click_extension` | 转述 `userMessage`，等待用户点击并确认。 |
+| `blocked` | 转述 `userMessage`并停止。 |
+
+`install_extension` 的提示会同时要求安装 Extension、打开该浏览器并点击“立即连接”。用户
+完成 `install_extension` 或 `open_browser_and_click_extension` 返回的全部动作后，都只运行
+结果中的同一个 `retryCommand` 一次：
+
+~~~text
+node scripts/moneyhand.mjs --connect --after-user-action
 ~~~
 
-每条命令使用唯一 `id`。结果可能乱序，必须按 `id` 关联。不要把 JSONL ID 当成 Task Space ID 或浏览器 request ID。
+该命令仍未连接时必须停止，不得进行第三次自动重试。
 
-直接调用 Extension wire 方法：
+## 3. 连接成功后等待任务
 
-~~~json
-{"id":"hand-1","op":"request","args":{"request":{"method":"system.status","params":{}}}}
-~~~
+不要自动访问百度、Google、Reddit 或其他网站，不要枚举标签页、截图或做烟雾测试。只问：
 
-## 4. 多步任务先建 Task Space
+> MoneyHand 已连接，可以开始使用。你希望我现在操作哪个网页、完成什么任务？如果目标页面已经打开，请切到那个页面。
 
-默认请求每次会选择最近焦点 Profile；这适合独立探针，不适合依赖前序状态的动作。多步任务先固定当前 `instanceId + bootId`：
+收到任务后才按基础 Skill 的任务阶段说明使用 MoneyHand。专项 Skill 可以复用已连接的
+MoneyHand，但必须自己拥有领域工作流、范围、字段、完成标准和输出。
 
-~~~json
-{"id":"space-1","op":"createTaskSpace","args":{"taskSpaceId":"research"}}
-~~~
+## 4. 禁止发散排障
 
-后续通过 `taskRequest`、`navigateTaskTab` 或语义动作使用同一个 `taskSpaceId`，并声明 effect：
-
-~~~json
-{"id":"tabs-1","op":"taskRequest","args":{"taskSpaceId":"research","effect":"read-only","request":{"method":"target.list","params":{}}}}
-~~~
-
-Profile reload/restart 后 `bootId` 改变；旧 Space、snapshot 和 ref 失效，重新观察并绑定。
-
-## 5. 默认 raw，human 必须显式
-
-没有行为设置时走 `raw` 快速路径。只有任务明确需要时启用有界 `human`：
-
-~~~json
-{"id":"human-1","op":"request","args":{"request":{"method":"behavior.set","params":{"mode":"human","typingDelayMs":45,"pointerSteps":18,"pointerDurationMs":320,"betweenStepsMs":120,"ttlMs":300000}}}}
-~~~
-
-阶段结束必须 reset：
-
-~~~json
-{"id":"raw-1","op":"request","args":{"request":{"method":"behavior.reset","params":{}}}}
-~~~
-
-`human` 只改变输入形态和节奏，不绕过验证码、访问控制或限流。
-
-## 6. 批量任务先 pilot
-
-为每个站点 origin + Profile/account 建独立 rate scope。开始批量任务前先读取计划：
-
-~~~json
-{"id":"rate-1","op":"rateControl","args":{"action":"plan","input":{"scope":{"origin":"https://example.com","profile":"instance-0001"},"mode":"raw"}}}
-~~~
-
-每个小批次后把观察信号交回 `rateControl.observe`，遵守返回的 concurrency、interval、wait/stop 和 checkpoint 建议。429/503、`Retry-After`、持续 403、挑战页、账号状态变化或延迟异常都不是“继续拟人翻页”的信号。
-
-这是调用方显式执行的调度契约；普通 `request` 不会被自动限流。需要治理的每一个批次都必须
-先读 decision 再派发，不能把 `rateControl` 当成后台透明门禁。
-
-rate controller 只能 pilot、降并发、退避、cooldown、恢复和打开 circuit；不保证避免平台限制。
-
-## 7. 页面外操作交给人
-
-MoneyHand 只能控制网页目标。canvas、地图、WebGL 可在明确截图映射后用页面 CDP Input；以下表面返回 `human`：
-
-- Chrome 工具栏或扩展 UI；
-- 原生保存/打印/文件对话框；
-- 权限提示、系统认证和 CAPTCHA；
-- 其他桌面应用。
-
-不要把 `css-viewport-v1` 坐标当成屏幕坐标。
-
-## 8. 正常关闭
-
-先等已接收命令完成，再关闭：
-
-~~~json
-{"id":"drain-1","op":"drain","args":{}}
-{"id":"stop-1","op":"shutdown","args":{}}
-~~~
-
-按顺序确认：
-
-1. `drain-1` result；
-2. `stop-1` result；
-3. `moneyhand.stopped`；
-4. stdout EOF；
-5. 全部预期 result ID 已收到。
-
-exit code `0` 不能替代 stdout 完整消费。
-
-## 9. ESM 模式
-
-可持续运行 JavaScript 的 Agent 应持有一个任务期实例：
-
-~~~js
-import { createMoneyHand } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
-
-const moneyhand = createMoneyHand({ host: "127.0.0.1", port: 19846 });
-
-await moneyhand.start();
-try {
-  await moneyhand.wait({ timeoutMs: 60_000 });
-  const status = await moneyhand.request({
-    method: "system.status",
-    params: {}
-  });
-} finally {
-  await moneyhand.stop();
-}
-~~~
-
-同一任务中的专项 Skill 或次抛模块复用这个 `moneyhand` 对象，不再启动 listener。
-
-## 下一步
-
-- 完整宿主模式：[AGENT_INTEGRATION.md](./AGENT_INTEGRATION.md)
-- 错误与重试：[AGENT_TROUBLESHOOTING.md](./AGENT_TROUBLESHOOTING.md)
-- Extension wire：[PROTOCOL.md](./PROTOCOL.md)
-- 真实 Profile 验收：[REAL_CHROME_TEST.md](./REAL_CHROME_TEST.md)
+连接过程中禁止读取 Extension 源码、运行预检、扫描端口、切换控制工具、写临时控制器、
+修改浏览器 Profile、杀浏览器进程或改变固定端点。规定路径失败时返回并停止。

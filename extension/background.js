@@ -11,7 +11,7 @@ function startBridge() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const operation = {
     "popup.status": () => bridge.status(),
-    "popup.configure": () => bridge.configure(message),
+    "popup.connect": () => bridge.connectDefault(),
     "popup.stop": () => bridge.stop(),
   }[message?.type];
   if (!operation) return false;

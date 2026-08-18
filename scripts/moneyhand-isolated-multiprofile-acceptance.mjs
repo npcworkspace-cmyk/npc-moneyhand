@@ -362,7 +362,7 @@ async function readyMoneyHandWorker(port) {
   return undefined;
 }
 
-async function configureMoneyHand(ready, moneyhandPort, instanceId) {
+async function connectMoneyHand(ready, instanceId) {
   const settings = { instanceId };
   const storeExpression = [
     "(async () => {",
@@ -405,30 +405,28 @@ async function configureMoneyHand(ready, moneyhandPort, instanceId) {
         intervalMs: 50,
         label: "MoneyHand popup target",
       });
-      const configureExpression = [
+      const connectExpression = [
         "chrome.runtime.sendMessage({",
-        "  type: 'popup.configure',",
-        "  address: '127.0.0.1',",
-        `  port: ${moneyhandPort},`,
+        "  type: 'popup.connect',",
         "})",
       ].join("\n");
-      const configured = await waitFor(async () => {
+      const connected = await waitFor(async () => {
         const evaluated = await cdpCommand(popup.webSocketDebuggerUrl, "Runtime.evaluate", {
-          expression: configureExpression,
+          expression: connectExpression,
           returnByValue: true,
           awaitPromise: true,
         });
         if (evaluated.exceptionDetails) {
-          throw new Error(`popup.configure failed: ${runtimeException(evaluated)}`);
+          throw new Error(`popup.connect failed: ${runtimeException(evaluated)}`);
         }
         const status = evaluated.result?.value;
         return status?.enabled === true ? status : undefined;
       }, {
         timeoutMs: 8_000,
         intervalMs: 100,
-        label: "MoneyHand popup.configure response",
+        label: "MoneyHand popup.connect response",
       });
-      return { ...value, status: configured };
+      return { ...value, status: connected };
     } finally {
       await cdpCommand(browserWebSocketUrl, "Target.closeTarget", {
         targetId: created.targetId,
@@ -648,7 +646,7 @@ const fixture = startFixtureServer(tokens);
 const hosts = [];
 const moneyhand = createMoneyHand({
   host: "127.0.0.1",
-  port: 0,
+  port: 19_846,
   connectTimeoutMs: 10_000,
   requestTimeoutMs: 15_000,
   handshakeTimeoutMs: 4_500,
@@ -673,9 +671,8 @@ try {
     b: `http://127.0.0.1:${fixturePort}/b?token=${tokens.b}`,
   };
   await moneyhand.start();
-  const moneyhandPort = moneyhand.peer.boundPort;
-  if (!Number.isInteger(moneyhandPort) || moneyhandPort < 1) {
-    throw new Error("MoneyHand did not bind an ephemeral loopback port");
+  if (moneyhand.peer.boundPort !== 19_846) {
+    throw new Error("MoneyHand did not bind fixed loopback port 19846");
   }
 
   const firstHost = launchProfile({
@@ -712,8 +709,8 @@ try {
   }
 
   const configured = await Promise.all([
-    configureMoneyHand(readyEvents[0], moneyhandPort, instanceIds.a),
-    configureMoneyHand(readyEvents[1], moneyhandPort, instanceIds.b),
+    connectMoneyHand(readyEvents[0], instanceIds.a),
+    connectMoneyHand(readyEvents[1], instanceIds.b),
   ]);
   let lastSessionStatus;
   const sessions = await waitFor(() => {

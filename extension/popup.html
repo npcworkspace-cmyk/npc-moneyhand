@@ -13,16 +13,11 @@
         <p id="status">正在读取状态…</p>
       </header>
 
-      <form id="connection">
-        <div class="endpoint">
-          <label class="sr-only" for="address">本机地址</label>
-          <input id="address" aria-label="本机地址" autocomplete="off" spellcheck="false" value="127.0.0.1">
-          <span class="separator">:</span>
-          <label class="sr-only" for="port">端口</label>
-          <input id="port" aria-label="端口" type="number" min="1" max="65535" inputmode="numeric" value="19846">
-          <button id="save" type="submit">保存</button>
-        </div>
-      </form>
+      <div class="connection">
+        <code id="endpoint">127.0.0.1:19846</code>
+        <button id="connect" type="button">立即连接</button>
+      </div>
+      <p class="hint">Agent 只需启动 <code>moneyhand --connect</code></p>
     </main>
     <script src="popup.js" type="module"></script>
   </body>

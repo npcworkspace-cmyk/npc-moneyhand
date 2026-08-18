@@ -15,15 +15,10 @@ function fakeElement() {
   return {
     className: "",
     disabled: false,
-    focused: false,
     textContent: "",
     title: "",
-    value: "",
     addEventListener(type, listener) {
       listeners.set(type, listener);
-    },
-    focus() {
-      this.focused = true;
     },
     listener(type) {
       return listeners.get(type);
@@ -31,21 +26,18 @@ function fakeElement() {
   };
 }
 
-test("popup runtime saves, reports transport errors, refreshes READY, and validates locally", async () => {
+test("popup exposes only status and an immediate fixed-endpoint reconnect", async () => {
   const previousChrome = globalThis.chrome;
   const previousDocument = globalThis.document;
   const previousSetInterval = globalThis.setInterval;
   const elements = {
-    "#connection": fakeElement(),
-    "#address": fakeElement(),
-    "#port": fakeElement(),
-    "#save": fakeElement(),
+    "#connect": fakeElement(),
     "#status": fakeElement(),
   };
   const messages = [];
   let intervalCallback;
   let responseMode = "initial";
-  let releaseConfigure;
+  let releaseConnect;
   let releaseStatus;
 
   globalThis.document = {
@@ -58,24 +50,14 @@ test("popup runtime saves, reports transport errors, refreshes READY, and valida
     return 1;
   };
   globalThis.chrome = {
-    storage: {
-      local: {
-        async get() {
-          return {
-            enabled: false,
-            wsEndpoint: "ws://127.0.0.1:19847/extension",
-          };
-        },
-      },
-    },
     runtime: {
       async sendMessage(message) {
         messages.push(message);
         if (responseMode === "reject") throw new Error("后台通道断开");
         if (responseMode === "empty") return undefined;
-        if (responseMode === "deferred-configure" && message.type === "popup.configure") {
+        if (responseMode === "deferred-connect" && message.type === "popup.connect") {
           return await new Promise((resolve) => {
-            releaseConfigure = resolve;
+            releaseConnect = resolve;
           });
         }
         if (responseMode === "deferred-status" && message.type === "popup.status") {
@@ -86,10 +68,10 @@ test("popup runtime saves, reports transport errors, refreshes READY, and valida
         if (responseMode === "ready") {
           return { enabled: true, state: "READY", lastError: "" };
         }
-        if (message.type === "popup.configure") {
+        if (message.type === "popup.connect") {
           return { enabled: true, state: "CONNECTING", lastError: "" };
         }
-        return { enabled: false, state: "DISABLED", lastError: "" };
+        return { enabled: true, state: "DISCONNECTED", lastError: "" };
       },
     },
   };
@@ -98,49 +80,40 @@ test("popup runtime saves, reports transport errors, refreshes READY, and valida
     await import(`../extension/popup.js?popup-runtime=${Date.now()}`);
     await waitFor(() => messages.length === 1);
 
-    assert.equal(elements["#address"].value, "127.0.0.1");
-    assert.equal(elements["#port"].value, "19847");
-    assert.equal(elements["#status"].textContent, "未启用");
+    assert.deepEqual(messages[0], { type: "popup.status" });
+    assert.equal(elements["#status"].textContent, "等待 Agent");
     assert.equal(typeof intervalCallback, "function");
 
-    const submit = elements["#connection"].listener("submit");
-    const event = { preventDefault() {} };
-    elements["#address"].value = "localhost";
-    elements["#port"].value = "19848";
-    await submit(event);
-
-    assert.deepEqual(messages.at(-1), {
-      type: "popup.configure",
-      address: "localhost",
-      port: 19848,
-    });
+    const click = elements["#connect"].listener("click");
+    await click();
+    assert.deepEqual(messages.at(-1), { type: "popup.connect" });
     assert.equal(elements["#status"].textContent, "连接中");
-    assert.equal(elements["#save"].disabled, false);
+    assert.equal(elements["#connect"].disabled, false);
 
     responseMode = "deferred-status";
     const messagesBeforeSlowPoll = messages.length;
     intervalCallback();
     await waitFor(() => messages.length === messagesBeforeSlowPoll + 1);
     responseMode = "initial";
-    await submit(event);
+    await click();
     releaseStatus({ enabled: true, state: "READY", lastError: "" });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(elements["#status"].textContent, "连接中");
 
-    responseMode = "deferred-configure";
-    const messagesBeforeConfigure = messages.length;
-    const pendingConfigure = submit(event);
-    await waitFor(() => messages.length === messagesBeforeConfigure + 1);
-    assert.equal(elements["#save"].disabled, true);
+    responseMode = "deferred-connect";
+    const messagesBeforeConnect = messages.length;
+    const pendingConnect = click();
+    await waitFor(() => messages.length === messagesBeforeConnect + 1);
+    assert.equal(elements["#connect"].disabled, true);
     intervalCallback();
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(messages.length, messagesBeforeConfigure + 1);
-    releaseConfigure({ enabled: true, state: "CONNECTING", lastError: "" });
-    await pendingConfigure;
-    assert.equal(elements["#save"].disabled, false);
+    assert.equal(messages.length, messagesBeforeConnect + 1);
+    releaseConnect({ enabled: true, state: "CONNECTING", lastError: "" });
+    await pendingConnect;
+    assert.equal(elements["#connect"].disabled, false);
 
     responseMode = "reject";
-    await submit(event);
+    await click();
     assert.equal(elements["#status"].textContent, "后台通道断开");
     assert.equal(elements["#status"].className, "red");
 
@@ -152,20 +125,6 @@ test("popup runtime saves, reports transport errors, refreshes READY, and valida
     intervalCallback();
     await waitFor(() => elements["#status"].textContent === "已连接");
     assert.equal(elements["#status"].className, "green");
-
-    const sentBeforeValidation = messages.length;
-    elements["#address"].value = "192.168.1.10";
-    await submit(event);
-    assert.equal(messages.length, sentBeforeValidation);
-    assert.equal(elements["#status"].textContent, "地址仅支持 127.0.0.1、localhost 或 ::1");
-    assert.equal(elements["#address"].focused, true);
-
-    elements["#address"].value = "127.0.0.1";
-    elements["#port"].value = "70000";
-    await submit(event);
-    assert.equal(messages.length, sentBeforeValidation);
-    assert.equal(elements["#status"].textContent, "端口必须是 1–65535");
-    assert.equal(elements["#port"].focused, true);
   } finally {
     if (previousChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = previousChrome;

@@ -2394,7 +2394,7 @@
         "hand-session",
         "task-space",
         "semantic-snapshot",
-        "approval-if-high-impact"
+        "caller-policy-if-configured"
       ],
       "args": {
         "required": [
@@ -5295,7 +5295,7 @@
       "requires": [
         "hand-session",
         "task-space",
-        "approval-if-high-impact"
+        "caller-policy-if-configured"
       ],
       "args": {
         "required": [

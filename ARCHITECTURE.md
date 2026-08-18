@@ -15,7 +15,7 @@ skills/npc-moneyhand
   ├─ WebSocket Peer and Profile routing
   ├─ Task Spaces and page transitions
   ├─ semantic snapshots / locators / guarded actions
-  ├─ approvals / unknown-outcome recovery
+  ├─ optional caller policy / unknown-outcome recovery
   └─ adaptive rate controller
                  │ npc-moneyhand/2 over loopback WS
                  ▼
@@ -38,7 +38,7 @@ Real Chrome Profile
 | 路径 | 职责 | 运行依赖 |
 | --- | --- | --- |
 | `extension/` | Chrome 内的 WS client、协议验证、CDP/Input/Chrome API 执行、行为和状态图标 | Chrome 125+；零外部包 |
-| `skills/npc-moneyhand/` | Agent 控制台、WS listener、语义动作、Task Space、审批、恢复、限流器和组合契约 | Node.js 20+；零外部 runtime package |
+| `skills/npc-moneyhand/` | Agent 控制台、WS listener、自动浏览器唤醒、语义动作、Task Space、恢复、可选限流和组合契约 | Node.js 20+；零外部 runtime package |
 
 `moneyhand` 是唯一正式 CLI。Skill 的控制协议为 `npc-moneyhand-control/1`；Extension wire 为 `npc-moneyhand/2`。JSONL 正常生命周期事件为 `moneyhand.listening` 和 `moneyhand.stopped`。
 
@@ -50,20 +50,21 @@ Real Chrome Profile
 | --- | --- |
 | `skills/npc-moneyhand/SKILL.md` | 触发条件、核心工作流和按需 reference 路由 |
 | `skills/npc-moneyhand/scripts/moneyhand.mjs` | `moneyhand` CLI、ESM、JSONL 和任务模块入口 |
+| `skills/npc-moneyhand/scripts/lib/browser-launch.mjs` | 复用在线会话或自动打开已安装 MoneyHand 的 Chromium Profile |
 | `skills/npc-moneyhand/scripts/lib/peer.mjs` | loopback WebSocket Peer 和会话管理 |
 | `skills/npc-moneyhand/scripts/lib/task-spaces.mjs` | 精确 Profile/tab 所有权和任务绑定 |
 | `skills/npc-moneyhand/scripts/lib/page-transitions.mjs` | 单次导航、稳定 readiness 和结果未知语义 |
 | `skills/npc-moneyhand/scripts/lib/semantic-*.mjs` | 有界语义快照、稳定 locator 和受守卫动作 |
-| `skills/npc-moneyhand/scripts/lib/task-approvals.mjs` | 高影响动作的一次性审批 |
+| `skills/npc-moneyhand/scripts/lib/task-approvals.mjs` | 可选的调用方一次性决策记录；不是发布/发送/上传门禁 |
 | `skills/npc-moneyhand/scripts/lib/rate-control.mjs` | pilot、退避、cooldown、恢复和 circuit |
 | `skills/npc-moneyhand/assets/disposable-task.mjs` | 可复制的可信本地任务模块模板 |
 | `skills/npc-moneyhand/references/*.md` | 按需加载的生命周期、浏览器工作流、限流和组合说明 |
 | `skills/npc-moneyhand/references/*.json` | 机器可读控制面、wire 和 operation catalog |
-| `extension/background.js` | 组装 bridge，响应弹窗配置和连接状态 |
+| `extension/background.js` | 组装 bridge，响应弹窗立即重连和连接状态 |
 | `extension/bridge.js` | 握手、心跳、重连、关联、去重、队列和背压 |
 | `extension/executor.js` | CDP、Input、Chrome API、行为和观察方法 |
 | `extension/protocol.js` | wire 常量、默认值、验证和 envelope |
-| `extension/popup.*` | 仅编辑本机地址/端口并显示状态 |
+| `extension/popup.*` | 仅显示固定端点、连接状态和立即重连按钮 |
 | `scripts/install-skill.mjs` | link/copy 安装、更新、移除和可恢复回滚 |
 | `docs/` | 用户与集成文档 |
 
@@ -73,10 +74,11 @@ Real Chrome Profile
 
 ~~~text
 Agent task starts
-  → create/start one MoneyHand controller
+  → `--connect` or create/start one MoneyHand controller
   → bind loopback endpoint
   → moneyhand.listening
-  → Extension reconnects and completes npc-moneyhand/2 handshake
+  → reuse a live Extension or open its installed Chromium Profile
+  → Extension completes npc-moneyhand/2 handshake
   → wait for compatible session
   → create Task Space for dependent work
   → execute raw/human browser phases
@@ -89,7 +91,7 @@ Agent task starts
 
 一个端口属于一个 Agent 任务。多个 Chrome Profile 可以连接同一 controller；默认目标按当前焦点、持久化的最后焦点时间和稳定 session 顺序选择。多步任务必须使用 Task Space 固定 `instanceId + bootId`，防止中途焦点变化改写目标。
 
-Extension 主动连接 Skill listener。活跃 Service Worker 通常在短退避后发现 listener，持久 alarm 负责跨 MV3 休眠重试；Chrome 关闭、扩展禁用或系统休眠时，listener 无法启动或唤醒它。
+Extension 主动连接 Skill listener。`--connect`、`--call` 和 `--task` 会先复用在线会话；短时未连上时，自动打开本机已安装 MoneyHand 的 Chromium Profile，但不关闭或重启现有浏览器。未安装扩展时仍需用户手动加载 Release ZIP；Chromium 不允许 Skill 静默安装 unpacked Extension。
 
 ## 控制面和 wire
 
@@ -167,7 +169,7 @@ rate controller 是显式 caller scheduler，不是 `request()` 的透明拦截�
 禁止：
 
 - 复制 Peer 或启动第二个同端口 listener；
-- 绕过 Task Space、审批、unknown-outcome 和 rate-control 约束；
+- 复制 Peer、重复占用 listener，或在 `OUTCOME_UNKNOWN` 后盲目重放写操作；
 - 把站点解析器、持久数据库、模型 SDK或账号策略写进 Extension；
 - 从页面内容生成并执行任务模块。
 
@@ -176,13 +178,13 @@ rate controller 是显式 caller scheduler，不是 `request()` 的透明拦截�
 ## 网络与信任边界
 
 - listener 只绑定 `127.0.0.1`、`localhost` 或 `::1`；
-- endpoint 固定为 `ws://<loopback>:<port>/extension`；
+- endpoint 固定为 `ws://127.0.0.1:19846/extension`；
 - Peer 校验 request-target、Host、remote address 和 Chrome Extension Origin；
 - 首个完成握手的 Extension Origin 锁定本次 controller 生命周期；
 - 可选配对密钥只来自 `NPC_MONEYHAND_PAIRING_TOKEN`；
 - 页面文本和可见控件始终是不可信输入；
 - CDP 技术可见性不是数据权利或业务授权；
-- 付款、发布、发送、删除、上传等高影响效果必须绑定当前明确确认。
+- 付款、发布、发送、删除、上传等账号动作收到 Agent 明确请求后直接派发；MoneyHand 不强制二次确认或审批 token。
 
 ## 验证边界
 

@@ -87,13 +87,30 @@ function assertDescriptor(descriptor, contract, catalog) {
   assert.deepEqual(descriptor.contract, contract);
   assert.deepEqual(descriptor.capabilities.agentInterop, contract.agentInterop);
   assert.deepEqual(
-    descriptor.capabilities.installationPreflight,
-    contract.installationPreflight,
+    descriptor.capabilities.automaticConnection,
+    contract.automaticConnection,
   );
-  assert.equal(contract.installationPreflight.automaticOnSkillRead, false);
-  assert.equal(contract.installationPreflight.readOnly, true);
-  assert.equal(contract.installationPreflight.writesFilesystem, false);
-  assert.deepEqual(contract.installationPreflight.extensionDistribution, {
+  assert.equal(contract.automaticConnection.command, "--connect");
+  assert.equal(contract.automaticConnection.resultSchema, "npc-moneyhand-connect/1");
+  assert.equal(contract.automaticConnection.successNextAction, "ask_user_for_task");
+  assert.equal(contract.automaticConnection.userRetryFlag, "--after-user-action");
+  assert.equal(contract.automaticConnection.maximumUserConfirmedRetries, 1);
+  assert.equal(contract.automaticConnection.runsBrowserOperation, false);
+  assert.equal(contract.automaticConnection.outerOkMeaning, "bounded-result-produced");
+  assert.equal(
+    contract.automaticConnection.connectedPredicate,
+    "value.connected=true-and-value.status=connected",
+  );
+  assert.equal(contract.automaticConnection.endpoint, "ws://127.0.0.1:19846/extension");
+  assert.equal(contract.automaticConnection.fixedEndpoint, true);
+  assert.equal(contract.automaticConnection.portDiscovery, false);
+  assert.equal(contract.automaticConnection.customEndpoint, false);
+  assert.equal(contract.automaticConnection.extensionFirstRunAutoEnabled, true);
+  assert.equal(contract.automaticConnection.popupAction, "immediate-reconnect");
+  assert.equal(contract.automaticConnection.fullPreflightRequired, false);
+  assert.equal(contract.automaticConnection.startsBrowserWhenNeeded, true);
+  assert.equal(contract.automaticConnection.closesExistingBrowser, false);
+  assert.deepEqual(contract.automaticConnection.extensionDistribution, {
     bundledWithSkill: false,
     automaticDownload: false,
     repositoryUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand",

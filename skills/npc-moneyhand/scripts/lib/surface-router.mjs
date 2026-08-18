@@ -20,25 +20,12 @@ const HUMAN_TAKEOVER = new Set([
 ]);
 
 const PAGE_VISUAL = new Set(["canvas", "map", "webgl", "page-visual"]);
-const HIGH_IMPACT = new Set(["delete", "external-write", "payment", "publish", "send", "upload"]);
 
 export function routeSurface(input = {}) {
   const surface = typeof input.surface === "string" ? input.surface : "web-page";
   const reason = typeof input.reason === "string" ? input.reason.slice(0, 1_000) : "";
   const risk = typeof input.risk === "string" ? input.risk : "read-only";
   const fallbackAllowed = input.fallbackAllowed !== false;
-  const userConfirmed = input.userConfirmed === true;
-
-  if (HIGH_IMPACT.has(risk) && !userConfirmed) {
-    return {
-      backend: "human",
-      mode: "confirmation-required",
-      surface,
-      risk,
-      reason,
-      escalation: [],
-    };
-  }
 
   if (DESKTOP_ACCESSIBILITY.has(surface)) {
     return {

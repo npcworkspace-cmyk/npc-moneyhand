@@ -24,17 +24,11 @@
 - `1.0.0` Skill 与 Extension 版本；
 - Chrome 和 Node 版本；
 - Profile 是否包含真实账号；
-- 测试端口；
+- 固定端点 `ws://127.0.0.1:19846/extension`；
 - 开始/结束时间；
 - 所有允许的外部效果。
 
-建议使用空闲端口 `19847`，避免占用日常 `19846`。在 Extension 弹窗临时保存同一端口，测试完成后恢复。
-
-PowerShell：
-
-~~~powershell
-$env:NPC_MONEYHAND_PORT = "19847"
-~~~
+测试前停止其他 MoneyHand controller，确保固定端口 `19846` 空闲。Extension 不需要保存配置。
 
 如使用配对：
 
@@ -95,7 +89,7 @@ npm run e2e:chrome
 
 ## C. 最近焦点与 Task Space
 
-在两个安装了 Extension 的 Profile 中使用同一端口：
+在两个安装了 Extension 的 Profile 中使用固定端口 `19846`：
 
 1. 依次聚焦 A、B，并观察 active session 变化；
 2. 聚焦 A 后创建 Space A；
@@ -185,7 +179,7 @@ npm run e2e:chrome
 - [ ] Extension reload 后 `instanceId` 稳定、`bootId` 更新；
 - [ ] Chrome restart 后自动重连；
 - [ ] 禁用 Extension 后不再连接；
-- [ ] Chrome 关闭时启动 listener 不会启动 Chrome。
+- [ ] 纯持久 listener 不会自动启动 Chrome；`--connect`/`--call`/`--task` 在未连接时会打开已安装 MoneyHand 的 Profile。
 
 至少做一次 30 分钟连接稳定观察；长期交付应按真实任务时长单独测试。
 
@@ -222,6 +216,6 @@ npm run smoke:site
 - rate/challenge 信号；
 - unknown outcome 数；
 - 未执行或跳过的项目；
-- 恢复后的 Extension endpoint。
+- 重连后的 Extension 状态。
 
 只有证据存在的项才标为通过。

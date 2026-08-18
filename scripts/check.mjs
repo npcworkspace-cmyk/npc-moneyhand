@@ -73,8 +73,8 @@ const requiredFiles = [
   "skills/npc-moneyhand/references/agent-hosts.md",
   "skills/npc-moneyhand/references/extension-integrity.json",
   "skills/npc-moneyhand/references/learning-and-approvals.md",
-  "skills/npc-moneyhand/scripts/preflight.mjs",
   "skills/npc-moneyhand/scripts/lib/browser-discovery.mjs",
+  "skills/npc-moneyhand/scripts/lib/browser-launch.mjs",
   "skills/npc-moneyhand/scripts/moneyhand.mjs",
   "skills/npc-moneyhand/scripts/lib/agent-descriptor.mjs",
   "skills/npc-moneyhand/scripts/lib/peer.mjs",
@@ -123,16 +123,15 @@ if (skillPackage.name !== "npc-moneyhand"
   || skillPackage.devDependencies
   || skillPackage.optionalDependencies
   || skillPackage.bin?.moneyhand !== "./scripts/moneyhand.mjs"
-  || skillPackage.bin?.["moneyhand-preflight"] !== "./scripts/preflight.mjs"
   || skillPackage.exports?.["."] !== "./scripts/moneyhand.mjs"
-  || skillPackage.exports?.["./preflight"] !== "./scripts/preflight.mjs") {
+  || Object.keys(skillPackage.bin ?? {}).length !== 1
+  || Object.keys(skillPackage.exports ?? {}).length !== 1) {
   fail("npc-moneyhand Skill must remain an independent zero-dependency ESM/CLI package");
 }
-if (packageJson.exports?.["./preflight"]
-    !== "./skills/npc-moneyhand/scripts/preflight.mjs"
+if (Object.keys(packageJson.exports ?? {}).length !== 1
   || packageJson.scripts?.["skill:pack:portable"]
     !== "node scripts/build-portable-skill.mjs") {
-  fail("repository must expose and build the portable MoneyHand preflight Skill");
+  fail("repository must expose and build the portable MoneyHand Skill");
 }
 
 const contract = readJson("skills/npc-moneyhand/references/moneyhand-contract.json");
@@ -140,38 +139,46 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.runtime?.externalPackages !== 0
   || contract.agentInterop?.commandFields?.arguments !== "args"
   || contract.agentInterop?.argumentPolicy?.mixedWithTopLevel !== "reject"
-  || contract.installationPreflight?.schema !== "npc-moneyhand-preflight/1"
-  || contract.installationPreflight?.automaticOnSkillRead !== false
-  || contract.installationPreflight?.readOnly !== true
-  || contract.installationPreflight?.startsBrowser !== false
-  || contract.installationPreflight?.startsListener !== false
-  || contract.installationPreflight?.writesFilesystem !== false
-  || contract.installationPreflight?.extensionEvidence !== "complete-extension-tree-sha256"
-  || contract.installationPreflight?.integrityManifest
-    !== "references/extension-integrity.json"
-  || contract.installationPreflight?.liveHandshakeRequired !== true
-  || contract.installationPreflight?.startEligibility
-    !== "complete-scan-with-enabled-declared-integrity-match"
-  || contract.installationPreflight?.maximumTotalReadBytes !== 268435456
-  || contract.installationPreflight?.maximumReportedInstallations !== 128
-  || contract.installationPreflight?.maximumReportedUnverifiedCandidates !== 128
-  || contract.installationPreflight?.customBrowserRootFlag !== "--browser-root"
-  || contract.installationPreflight?.extensionDistribution?.bundledWithSkill !== false
-  || contract.installationPreflight?.extensionDistribution?.automaticDownload !== false
-  || contract.installationPreflight?.extensionDistribution?.releasesUrl
+  || contract.automaticConnection?.command !== "--connect"
+  || contract.automaticConnection?.resultSchema !== "npc-moneyhand-connect/1"
+  || contract.automaticConnection?.successNextAction !== "ask_user_for_task"
+  || contract.automaticConnection?.userRetryFlag !== "--after-user-action"
+  || contract.automaticConnection?.maximumUserConfirmedRetries !== 1
+  || contract.automaticConnection?.runsBrowserOperation !== false
+  || contract.automaticConnection?.outerOkMeaning !== "bounded-result-produced"
+  || contract.automaticConnection?.connectedPredicate
+    !== "value.connected=true-and-value.status=connected"
+  || contract.automaticConnection?.endpoint !== "ws://127.0.0.1:19846/extension"
+  || contract.automaticConnection?.fixedEndpoint !== true
+  || contract.automaticConnection?.portDiscovery !== false
+  || contract.automaticConnection?.customEndpoint !== false
+  || contract.automaticConnection?.extensionFirstRunAutoEnabled !== true
+  || contract.automaticConnection?.popupAction !== "immediate-reconnect"
+  || contract.automaticConnection?.fullPreflightRequired !== false
+  || contract.automaticConnection?.reusesLiveSession !== true
+  || contract.automaticConnection?.startsBrowserWhenNeeded !== true
+  || contract.automaticConnection?.closesExistingBrowser !== false
+  || contract.automaticConnection?.readiness !== "npc-moneyhand-2-handshake"
+  || contract.automaticConnection?.customBrowserRootFlag !== "--browser-root"
+  || contract.automaticConnection?.extensionDistribution?.bundledWithSkill !== false
+  || contract.automaticConnection?.extensionDistribution?.automaticDownload !== false
+  || contract.automaticConnection?.extensionDistribution?.releasesUrl
     !== "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases"
-  || contract.installationPreflight?.extensionDistribution?.assetName
+  || contract.automaticConnection?.extensionDistribution?.assetName
     !== "npc-moneyhand-extension-1.0.0.zip"
-  || contract.installationPreflight?.extensionDistribution?.manualInstallRequired !== true
+  || contract.automaticConnection?.extensionDistribution?.manualInstallRequired !== true
   || contract.ownership?.taskSpaces?.maximumParallelRequests !== 64
   || contract.ownership?.taskSpaces?.maximumConcurrency !== 16
-  || contract.ownership?.taskSpaces?.highImpactApproval?.token !== "one-time-request-bound"
+  || contract.ownership?.taskSpaces?.highImpactApproval?.enforcement !== "optional-caller-policy"
   || contract.transports?.taskModule?.flag !== "--task"
+  || contract.transports?.directCall?.connectFlag !== "--connect"
+  || contract.transports?.directCall?.stdinRequired !== false
   || contract.transports?.npm?.bin !== "moneyhand"
   || contract.jsonlFieldSeparation?.taskSpaceId !== "taskSpaceId"
   || contract.siteLearnings?.executable !== false
   || contract.siteLearnings?.maximumRecords !== 128
-  || contract.highImpactApproval?.effectFieldRequired !== true) {
+  || contract.highImpactApproval?.effectFieldRequired !== true
+  || contract.highImpactApproval?.tokenRequired !== false) {
   fail("standalone MoneyHand Skill contract is invalid");
 }
 const acquisitionPolicy = contract.agentPolicy?.dataAcquisition;

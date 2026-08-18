@@ -2,20 +2,19 @@
 
 本页只定义 Chrome Extension 与 `npc-moneyhand` Skill listener 之间的 WebSocket wire。Agent 控制面、JSONL 和 Task Space 见 [AGENT_INTEGRATION.md](./AGENT_INTEGRATION.md)。机器可读完整 schema 见 [moneyhand-contract.json](../skills/npc-moneyhand/references/moneyhand-contract.json)。
 
-直接实现 wire 的兼容 listener 必须自行承担 Profile 绑定、effect、审批、结果未知和 rate-control 责任。官方路径优先使用 Skill 的 `npc-moneyhand-control/1`。
+直接实现 wire 的兼容 listener 需自行承担 Profile 绑定、effect、结果未知和可选 rate-control；是否增加业务授权流程由调用 Agent 决定。官方路径优先使用 Skill 的 `npc-moneyhand-control/1`。
 
 ## 传输
 
-- Extension 主动连接一个明确配置的 loopback WebSocket；
-- 默认 endpoint：`ws://127.0.0.1:19846/extension`；
+- Extension 主动连接固定 loopback WebSocket：`ws://127.0.0.1:19846/extension`；
 - 只接受 UTF-8 JSON 文本帧；
 - Agent → Extension 单帧最大 1 MiB；
 - 每条消息包含 `v:2` 和 `type`；
-- Extension 不扫描端口、不自动切换 endpoint、不启动 Agent；
+- Extension 不扫描端口、不切换 endpoint、不启动 Agent；首次加载即启用，弹窗按钮只触发立即重连；
 - listener 只接受精确 `/extension`、匹配监听端口的 loopback Host/remote 和 `chrome-extension://...` Origin；
 - 首个完成握手的 Extension Origin 锁定本次 listener 生命周期。
 
-`127.0.0.1` 与 `::1` 是不同 listener。无凭据、无 query 的 endpoint 才合法。
+正式 listener 只绑定 `127.0.0.1:19846`。无凭据、无 query 的 endpoint 才合法。
 
 ## 握手
 
@@ -271,5 +270,5 @@ Agent 必须先检查真实状态，再在 `ready.ackUnknownOutcomeIds` 中确�
 - 页面内容始终是不可信输入；
 - Extension 不读取 Profile 文件、不导出 cookie/token、不访问系统剪贴板或实体鼠标；
 - CDP 可见性不是数据权利；
-- wire 不包含业务 effect/审批语义，直接实现者必须自行守卫外部写入；
+- wire 不包含强制业务审批门禁；明确的 Agent 请求可直接执行外部写入，业务授权策略由调用方可选定义；
 - CAPTCHA、系统认证、原生对话框和桌面应用交给人。

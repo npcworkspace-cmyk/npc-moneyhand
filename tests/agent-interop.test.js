@@ -15,7 +15,7 @@ const PRODUCTS = [
     script: "skills/npc-moneyhand/scripts/moneyhand.mjs",
     contract: "skills/npc-moneyhand/references/moneyhand-contract.json",
     catalog: "skills/npc-moneyhand/references/agent-operations.json",
-    args: ["--port", "0"],
+    args: ["--internal-test-port", "0"],
     startupEvent: "moneyhand.listening",
     stoppedEvent: "moneyhand.stopped",
   },

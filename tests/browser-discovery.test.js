@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cp,
@@ -13,20 +12,16 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, parse, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
 import {
+  BROWSER_DISCOVERY_SCHEMA,
   discoverMoneyHand,
   discoveryLimits,
   EXTENSION_INTEGRITY_SCHEMA,
   knownChromiumBrowserRoots,
-  PREFLIGHT_SCHEMA,
   validateBrowserRootPath,
 } from "../skills/npc-moneyhand/scripts/lib/browser-discovery.mjs";
-import { parsePreflightArgs } from "../skills/npc-moneyhand/scripts/preflight.mjs";
-
-const run = promisify(execFile);
 const EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
 const PRIVATE_PROFILE_NAME = "do-not-return-profile-name";
 const PRIVATE_EMAIL = "do-not-return@example.invalid";
@@ -264,7 +259,7 @@ test("packed scan uses only Local State directory keys and returns no account id
     catalog: syntheticCatalog(browserRoot),
     browserRoots: [],
   });
-  assert.equal(report.schema, PREFLIGHT_SCHEMA);
+  assert.equal(report.schema, BROWSER_DISCOVERY_SCHEMA);
   assert.equal(report.policy.readOnly, true);
   assert.equal(report.policy.startsBrowser, false);
   assert.equal(report.policy.startsListener, false);
@@ -290,7 +285,6 @@ test("packed scan uses only Local State directory keys and returns no account id
     disabled: 0,
     unknown: 0,
   });
-  assert.equal(report.summary.controllerPreflightPassed, true);
   assert.equal(report.summary.controllerStartEligible, true);
   assert.equal(report.summary.liveHandshakeRequired, true);
   assert.equal(report.summary.browserReady, "unknown-until-npc-moneyhand-2-handshake");
@@ -460,7 +454,7 @@ test("a matching extension name without exact release integrity is not installed
   assert.equal(report.unverifiedCandidates.length, 1);
   assert.equal(report.unverifiedCandidates[0].verified, false);
   assert.equal(report.summary.extensionFound, false);
-  assert.equal(report.summary.controllerPreflightPassed, false);
+  assert.equal(report.summary.controllerStartEligible, false);
 });
 
 test("one modified byte fails the fixed release hash", async (t) => {
@@ -619,7 +613,7 @@ test("invalid Secure Preferences makes enabled Preferences ineligible fail-close
   assert.ok(report.scan.incompleteReasons.includes("PREFERENCES_INVALID_JSON"));
   assert.equal(report.scan.complete, false);
   assert.equal(report.summary.controllerStartEligible, false);
-  assert.equal(report.summary.controllerPreflightPassed, false);
+  assert.equal(report.summary.controllerStartEligible, false);
   assert.equal(
     report.summary.eligibilityScope,
     "complete-scan-with-enabled-declared-integrity-match",
@@ -924,7 +918,7 @@ test("enabled, disabled, and unknown extension states are counted separately", a
   assert.equal(report.summary.disabledInstallations, 1);
   assert.equal(report.summary.unknownInstallations, 1);
   assert.equal(report.summary.controllerStartEligible, true);
-  assert.equal(report.summary.controllerPreflightPassed, true);
+  assert.equal(report.summary.controllerStartEligible, true);
 });
 
 test("installation diagnostics are capped while observed counts and enabled priority stay exact", async (t) => {
@@ -1012,7 +1006,7 @@ test("an all-disabled verified installation is found but cannot start the contro
   assert.equal(report.summary.disabledInstallations, 1);
   assert.equal(report.summary.enabledInstallations, 0);
   assert.equal(report.summary.controllerStartEligible, false);
-  assert.equal(report.summary.controllerPreflightPassed, false);
+  assert.equal(report.summary.controllerStartEligible, false);
   assert.equal(report.installations[0].configurationState, "disabled");
   assert.equal(report.summary.browserReady, "unknown-until-npc-moneyhand-2-handshake");
 });
@@ -1033,88 +1027,7 @@ test("runtime and catalog injection simulate another OS without changing the hos
     supported: false,
   });
   assert.equal(report.summary.runtimeSupported, false);
-  assert.equal(report.summary.controllerPreflightPassed, false);
-});
-
-test("CLI accepts repeated absolute roots and emits exactly one JSON result", async (t) => {
-  const temporary = await mkdtemp(join(tmpdir(), "moneyhand-cli-root-"));
-  t.after(() => rm(temporary, { recursive: true, force: true }));
-  const firstRoot = join(temporary, "First Browser");
-  const secondRoot = join(temporary, "Second Browser");
-  const extension = join(
-    secondRoot,
-    "Default",
-    "Extensions",
-    EXTENSION_ID,
-    "1.0.0_0",
-  );
-  await mkdir(firstRoot, { recursive: true });
-  await createExtension(extension);
-  const script = resolve("skills/npc-moneyhand/scripts/preflight.mjs");
-  const { stdout, stderr } = await run(process.execPath, [
-    script,
-    "--json",
-    "--browser-root",
-    firstRoot,
-    `--browser-root=${secondRoot}`,
-  ], {
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  assert.equal(stderr, "");
-  const lines = stdout.trim().split(/\r?\n/u);
-  assert.equal(lines.length, 1);
-  const report = JSON.parse(lines[0]);
-  assert.equal(report.schema, PREFLIGHT_SCHEMA);
-  assert.ok(report.installations.some((installation) => installation.extensionPath === extension));
-});
-
-test("CLI rejects a network root with no JSON output", async () => {
-  const script = resolve("skills/npc-moneyhand/scripts/preflight.mjs");
-  const networkRoot = process.platform === "win32"
-    ? "\\\\server.invalid\\share\\User Data"
-    : "//server.invalid/share/User Data";
-  await assert.rejects(
-    run(process.execPath, [script, "--json", "--browser-root", networkRoot], {
-      encoding: "utf8",
-      windowsHide: true,
-    }),
-    (error) => error.code === 2
-      && error.stdout === ""
-      && /network/u.test(error.stderr),
-  );
-});
-
-test("CLI parser rejects ambiguous, relative, and filesystem-root scans", () => {
-  assert.throws(() => parsePreflightArgs([]), /--json is required/u);
-  assert.throws(() => parsePreflightArgs(["--json", "--unknown"]), /Unknown option/u);
-  assert.throws(
-    () => parsePreflightArgs(["--json", "--browser-root", "relative-profile"]),
-    /must be absolute|must be a local drive path/u,
-  );
-  assert.throws(
-    () => parsePreflightArgs(["--json", "--browser-root", parse(resolve(".")).root]),
-    /cannot be a filesystem root/u,
-  );
-  const networkRoot = process.platform === "win32"
-    ? "\\\\server\\share\\User Data"
-    : "//server/share/User Data";
-  assert.throws(
-    () => parsePreflightArgs(["--json", "--browser-root", networkRoot]),
-    /network/u,
-  );
-  if (process.platform === "win32") {
-    assert.throws(
-      () => parsePreflightArgs(["--json", "--browser-root", "\\\\?\\C:\\User Data"]),
-      /device/u,
-    );
-  }
-  assert.deepEqual(parsePreflightArgs(["--help"]), {
-    json: false,
-    browserRoots: [],
-    help: true,
-  });
+  assert.equal(report.summary.controllerStartEligible, false);
 });
 
 test("discovery implementation has no process launch, network, registry, or filesystem write primitive", async () => {

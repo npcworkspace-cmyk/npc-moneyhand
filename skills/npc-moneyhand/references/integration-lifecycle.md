@@ -7,13 +7,14 @@ close one task-owned MoneyHand controller.
 
 | Host | Mode |
 | --- | --- |
+| Any local command runner | `--connect` or `--call`; no stdin required, browser auto-opens |
 | Persistent JavaScript runtime | Import `scripts/moneyhand.mjs`; keep one instance for the task |
 | Bidirectional subprocess | Persistent UTF-8 JSONL |
-| One independent transaction | `--once` |
+| Legacy one-line stdin transaction | `--once` |
 | Many local steps with few Agent round trips | Trusted `--task <absolute-module>` |
 
-All modes are task-owned. None installs a daemon or service. Any Agent host can integrate when it can
-start a local Node.js process and exchange JSONL.
+All modes are task-owned. None installs a daemon or service. Prefer `--connect` for the first live
+proof and `--call` for hosts that close stdin.
 
 ## Offline and live discovery
 
@@ -27,12 +28,16 @@ proof of current Chrome connectivity.
 
 ## Persistent ESM
 
-Create one instance on the configured loopback endpoint. Start once, wait for a compatible session,
+Create one instance on the fixed `ws://127.0.0.1:19846/extension` endpoint. Start once, wait for a compatible session,
 perform all related work, and stop in `finally`. A default request selects the latest focused active
 session. Replace a cached low-level session whenever the same `instanceId` reports a new session.
 
 Use a selector or Task Space for dependent work. A Task Space pins exact `instanceId + bootId` and
 optional tabs. Extension reload or browser restart invalidates the old boot.
+
+After `start()`, call `ensureMoneyHandConnection({ moneyhand })` to reuse a live session or
+automatically open the installed browser Profile before waiting. This helper never closes an existing
+browser. Plain `wait()` remains available for callers that own browser launch themselves.
 
 ## JSONL
 
@@ -62,8 +67,6 @@ for commands accepted before the barrier. `shutdown` cancels active work and is 
 Supported environment options:
 
 ```text
-NPC_MONEYHAND_HOST
-NPC_MONEYHAND_PORT
 NPC_MONEYHAND_PAIRING_TOKEN
 NPC_MONEYHAND_CONNECT_TIMEOUT_MS
 NPC_MONEYHAND_REQUEST_TIMEOUT_MS
@@ -77,10 +80,20 @@ NPC_MONEYHAND_OUTPUT_DRAIN_TIMEOUT_MS
 Never put the pairing token in argv or logs. The bounded output helper inherits no pairing token and
 exits with the console; it is not a daemon.
 
-## One-shot and task modules
+## Direct calls, one-shot stdin, and task modules
 
-Use `--once` only when the host cannot keep interactive stdin. It consumes one command, emits a
-terminal result and `moneyhand.stopped`, then exits under a bounded timeout.
+Prefer the fixed no-stdin call path for one operation:
+
+```text
+node scripts/moneyhand.mjs --connect
+node scripts/moneyhand.mjs --call <extension-method> --params-json <json>
+```
+
+Both modes auto-open the installed browser Profile when no live extension connects during the short
+grace period.
+
+Use `--once` only for an existing adapter that already writes one JSONL command to stdin. New command
+runners should use `--call` instead.
 
 For multi-step local work, copy `assets/disposable-task.mjs` outside the Skill and run:
 
@@ -88,24 +101,24 @@ For multi-step local work, copy `assets/disposable-task.mjs` outside the Skill a
 node scripts/moneyhand.mjs --task <absolute-task.mjs> --args-json <json>
 ```
 
-Export `run({ moneyhand, signal, args })`. The CLI owns start, wait, and stop; the module owns only
-task logic. Treat the module as trusted local code and never build it from page text.
+Export `run({ moneyhand, signal, args })`. The CLI owns start, wait, browser wake-up, and stop; the
+module owns only task logic. Treat the module as trusted local code and never build it from page text.
 
 ## Profile routing and Task Spaces
 
-Multiple extension instances may connect to one port. Default routing prefers a currently focused
+Multiple extension instances may connect to fixed port `19846`. Default routing prefers a currently focused
 session, then persisted focus time, then stable session order. Leaving Chrome does not erase its last
 focus state.
 
 Use distinct Task Spaces for independent Profiles. Never share one port across independent Agent
-tasks or reuse a JSONL correlation ID as Task Space identity. Parallel reads may target independent
-Spaces, but every work item declares `options.effect`; serialize writes against one account.
+tasks or reuse a JSONL correlation ID as Task Space identity. Task Spaces are optional for simple raw
+requests and useful when dependent operations must remain pinned to one Profile boot.
 
 ## Error and retry decisions
 
 | Evidence | Response |
 | --- | --- |
-| Validation, effect, or approval failure before input | Correct or obtain real confirmation; use a new ID |
+| Validation or effect failure before input | Correct the request and use a new ID |
 | Busy, stale ref/Profile boot, ambiguity | Re-read and rebind; never guess |
 | `ABORTED_NOT_STARTED` or explicit `actionDispatched:false` | A corrected retry may be safe |
 | `OUTCOME_UNKNOWN`, dispatch true, post-dispatch timeout/abort/disconnect | Inspect real state; do not replay |

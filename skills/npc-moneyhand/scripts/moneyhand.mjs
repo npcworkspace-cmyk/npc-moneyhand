@@ -9,6 +9,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { Transform } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { normalizeAgentJsonlCommandEnvelope } from "./lib/agent-descriptor.mjs";
+import { ensureMoneyHandConnection } from "./lib/browser-launch.mjs";
 import {
   MoneyHandUnknownOutcomeError,
   createMoneyHandPeer,
@@ -60,7 +61,6 @@ import {
   HIGH_IMPACT_TASK_EFFECTS,
   TaskApprovalLedger,
   normalizeTaskEffect,
-  taskEffectRequiresApproval,
 } from "./lib/task-approvals.mjs";
 import {
   TaskSpaceRegistry,
@@ -81,11 +81,13 @@ export const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 export const DEFAULT_ONCE_TIMEOUT_MS = 120_000;
 export const MAX_JSONL_LINE_BYTES = 1024 * 1024;
 export const MAX_JSONL_INFLIGHT = 256;
+export const MONEYHAND_CONNECT_RESULT_SCHEMA = "npc-moneyhand-connect/1";
 export {
   AdaptiveRateController,
   RATE_CONTROL_DEFAULTS,
   RateControlError,
   createRateController,
+  ensureMoneyHandConnection,
 };
 
 const COMMAND_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
@@ -1802,12 +1804,26 @@ export class MoneyHand extends EventEmitter {
         minimumNodeMajor: 20,
         productionNodeMajors: [22, 24],
       },
-      installationPreflight: {
-        schema: "npc-moneyhand-preflight/1",
-        executable: "moneyhand-preflight",
-        script: "scripts/preflight.mjs",
-        firstUsePolicy: "required-by-skill-instructions",
-        automaticOnSkillRead: false,
+      automaticConnection: {
+        command: "--connect",
+        resultSchema: MONEYHAND_CONNECT_RESULT_SCHEMA,
+        successNextAction: "ask_user_for_task",
+        userRetryFlag: "--after-user-action",
+        maximumUserConfirmedRetries: 1,
+        runsBrowserOperation: false,
+        outerOkMeaning: "bounded-result-produced",
+        connectedPredicate: "value.connected=true-and-value.status=connected",
+        endpoint: "ws://127.0.0.1:19846/extension",
+        fixedEndpoint: true,
+        portDiscovery: false,
+        customEndpoint: false,
+        extensionFirstRunAutoEnabled: true,
+        popupAction: "immediate-reconnect",
+        fullPreflightRequired: false,
+        reusesLiveSession: true,
+        startsListener: true,
+        startsBrowserWhenNeeded: true,
+        closesExistingBrowser: false,
         platforms: ["win32", "darwin", "linux"],
         chromiumFamilies: [
           "chrome",
@@ -1821,15 +1837,8 @@ export class MoneyHand extends EventEmitter {
           "custom-chromium",
         ],
         customBrowserRootFlag: "--browser-root",
-        scan: "bounded-known-roots-and-explicit-roots",
-        extensionEvidence: "complete-extension-tree-sha256",
-        integrityManifest: "references/extension-integrity.json",
-        configurationStateEvidence: "preferences-and-secure-preferences",
-        startEligibility: "complete-scan-with-enabled-declared-integrity-match",
-        liveHandshakeRequired: true,
-        maximumTotalReadBytes: 268_435_456,
-        maximumReportedInstallations: 128,
-        maximumReportedUnverifiedCandidates: 128,
+        profileSelection: "focused-live-session-else-enabled-installed-profile",
+        readiness: "npc-moneyhand-2-handshake",
         extensionDistribution: {
           bundledWithSkill: false,
           automaticDownload: false,
@@ -1838,17 +1847,6 @@ export class MoneyHand extends EventEmitter {
           assetName: "npc-moneyhand-extension-1.0.0.zip",
           manualInstallRequired: true,
         },
-        readOnly: true,
-        startsBrowser: false,
-        startsListener: false,
-        writesFilesystem: false,
-        excludedProfileData: [
-          "cookies",
-          "passwords",
-          "history",
-          "local-storage",
-          "page-data",
-        ],
       },
       transports: {
         programmatic: true,
@@ -1865,6 +1863,14 @@ export class MoneyHand extends EventEmitter {
           cliFlag: "--task",
           trustedLocalCode: true,
           resultId: "task",
+        },
+        directCall: {
+          connectFlag: "--connect",
+          callFlag: "--call",
+          parametersFlag: "--params-json",
+          autoLaunchBrowser: true,
+          stdinRequired: false,
+          resultId: "call",
         },
       },
       operations: {
@@ -2033,7 +2039,7 @@ export class MoneyHand extends EventEmitter {
             disabledOptionsAllowed: false,
             multipleDescriptorsRequireMultipleSelect: true,
             callerPageJavaScript: false,
-            preflightBeforeApprovalConsumption: true,
+            preflightBeforeDispatch: true,
             dispatch: "fixed-runtime-function",
             events: ["input", "change"],
             trustedEvents: false,
@@ -2059,7 +2065,7 @@ export class MoneyHand extends EventEmitter {
           },
           taskSpaceRequired: true,
           effectFieldRequired: true,
-          highImpactApprovalOperation: "approveSemanticRefAction",
+          optionalApprovalOperation: "approveSemanticRefAction",
           verificationKinds: [...SEMANTIC_VERIFICATION_KINDS],
           defaultPointerAndKeyVerification: "observation-only",
           defaultDownloadVerification: "download-complete",
@@ -2126,8 +2132,9 @@ export class MoneyHand extends EventEmitter {
         maximumConcurrency: MAX_TASK_REQUEST_CONCURRENCY,
         highImpactApproval: {
           effects: [...HIGH_IMPACT_TASK_EFFECTS],
-          token: "one-time-request-bound",
-          confirmation: "recent-explicit-user-record",
+          enforcement: "optional-caller-policy",
+          token: "optional-backward-compatible-helper",
+          confirmation: "owned-by-invoking-agent-or-specialized-skill",
           activity: "bounded-agent-local-ledger",
         },
       },
@@ -2145,7 +2152,7 @@ export class MoneyHand extends EventEmitter {
           "human",
         ],
         browserUnreachable: "human-takeover",
-        highImpactRequiresConfirmation: true,
+        highImpactRequiresConfirmation: false,
       },
       rateControl: {
         operation: "rateControl",
@@ -2937,20 +2944,15 @@ export class MoneyHand extends EventEmitter {
           );
         }
       }
-      if (taskEffectRequiresApproval(plan.effect)) {
+      if (input.approvalToken !== undefined
+        && HIGH_IMPACT_TASK_EFFECTS.includes(plan.effect)) {
         this.taskApprovals.consume({
           token: input.approvalToken,
           taskSpaceId: space.id,
           effect: plan.effect,
           request: plan.approvalRequest,
         });
-      } else if (input.approvalToken !== undefined) {
-        throw new MoneyHandError(
-          "TASK_APPROVAL_NOT_REQUIRED",
-          `Effect '${plan.effect}' does not accept a high-impact approval token`,
-        );
       }
-
       let terminal = null;
       let actionDispatched = false;
       if (!checkableAction || !source.checkableState.satisfied) {
@@ -3235,20 +3237,6 @@ export class MoneyHand extends EventEmitter {
         "A semantic locator action must declare input, navigation, download, or its real high-impact effect",
       );
     }
-    if (taskEffectRequiresApproval(effect)) {
-      throw new MoneyHandError(
-        "SEMANTIC_LOCATOR_APPROVAL_PATH_REQUIRED",
-        "High-impact locator actions must use waitForSemanticLocator, approveSemanticRefAction, then actSemanticRef so approval binds the exact fresh ref",
-        { actionDispatched: false, effect },
-      );
-    }
-    if (input.approvalToken !== undefined) {
-      throw new MoneyHandError(
-        "TASK_APPROVAL_NOT_REQUIRED",
-        `Effect '${effect}' does not accept an approval token in actSemanticLocator`,
-      );
-    }
-
     let locator;
     let destinationLocator;
     let state;
@@ -3299,10 +3287,10 @@ export class MoneyHand extends EventEmitter {
         "The download effect is valid only for a semantic download action",
       );
     }
-    if (normalizedAction.action === "upload") {
+    if (normalizedAction.action === "upload" && effect !== "upload") {
       throw new MoneyHandError(
         "INVALID_TASK_EFFECT",
-        "Semantic upload requires the high-impact effect 'upload' and the explicit fresh-ref approval path",
+        "Semantic upload requires the exact effect 'upload'",
       );
     }
 
@@ -3851,7 +3839,7 @@ export class MoneyHand extends EventEmitter {
       );
     }
     const effect = normalizeTaskEffect(input.effect);
-    if (taskEffectRequiresApproval(effect)) {
+    if (input.approvalToken !== undefined && HIGH_IMPACT_TASK_EFFECTS.includes(effect)) {
       this.taskApprovals.consume({
         token: input.approvalToken,
         taskSpaceId: space.id,
@@ -5842,6 +5830,65 @@ function numericEnvironment(name, fallback) {
   return parsed;
 }
 
+function connectResult(value) {
+  return {
+    schema: MONEYHAND_CONNECT_RESULT_SCHEMA,
+    connected: value.status === "connected",
+    ...value,
+  };
+}
+
+function boundedConnectFailure(error, afterUserAction = false) {
+  const code = typeof error?.code === "string" ? error.code : "CONNECT_FAILED";
+  if (code === "EADDRINUSE") {
+    return connectResult({
+      status: "blocked",
+      code: "CONTROLLER_BUSY",
+      action: "stop",
+      nextAction: "report_and_stop",
+      userMessage: "MoneyHand 当前被另一个本地 Agent 任务占用。请结束那个任务后再试。",
+    });
+  }
+  if (afterUserAction) {
+    return connectResult({
+      status: "blocked",
+      code: "CONNECT_RETRY_EXHAUSTED",
+      action: "stop",
+      nextAction: "report_and_stop",
+      userMessage: "MoneyHand 在规定的一次人工恢复后仍未连接。当前已停止继续尝试，避免扰乱浏览器环境。",
+    });
+  }
+  if (code === "MONEYHAND_EXTENSION_NOT_FOUND") {
+    return connectResult({
+      status: "user_action_required",
+      code,
+      action: "install_extension",
+      nextAction: "wait_for_user_then_retry_once",
+      retryCommand: "node scripts/moneyhand.mjs --connect --after-user-action",
+      releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
+      releaseAsset: "npc-moneyhand-extension-1.0.0.zip",
+      userMessage: "未发现 MoneyHand 插件。请从项目 GitHub Releases 下载 npc-moneyhand-extension-1.0.0.zip，解压后在 Chromium 扩展管理页加载该目录；随后打开这个浏览器，点击工具栏里的 MoneyHand 图标和‘立即连接’。完成后告诉我‘好了’。",
+    });
+  }
+  if (["TIMEOUT", "BROWSER_EXECUTABLE_NOT_FOUND"].includes(code)) {
+    return connectResult({
+      status: "user_action_required",
+      code: "EXTENSION_NOT_CONNECTED",
+      action: "open_browser_and_click_extension",
+      nextAction: "wait_for_user_then_retry_once",
+      retryCommand: "node scripts/moneyhand.mjs --connect --after-user-action",
+      userMessage: "请打开装有 MoneyHand 的 Chromium 浏览器，点击工具栏里的 MoneyHand 图标，再点击‘立即连接’。完成后告诉我‘好了’。",
+    });
+  }
+  return connectResult({
+    status: "blocked",
+    code: "CONNECT_FAILED",
+    action: "stop",
+    nextAction: "report_and_stop",
+    userMessage: "MoneyHand 未能建立连接，当前已停止继续尝试，避免扰乱浏览器环境。",
+  });
+}
+
 function parseCliOptions(argv) {
   const values = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -5862,17 +5909,27 @@ function parseCliOptions(argv) {
       values.describe = true;
       continue;
     }
+    if (flag === "--connect") {
+      values.connect = true;
+      continue;
+    }
+    if (flag === "--after-user-action") {
+      values.afterUserAction = true;
+      continue;
+    }
+    if (flag === "--no-browser-launch") {
+      values.autoLaunchBrowser = false;
+      continue;
+    }
     const value = argv[index + 1];
     if (!flag.startsWith("--") || value === undefined || value.startsWith("--")) {
       throw new MoneyHandError("INVALID_OPTION", `Expected a value after '${flag}'`);
     }
     index += 1;
     switch (flag) {
-      case "--port":
+      // Undocumented ephemeral listener support for isolated test/conformance harnesses only.
+      case "--internal-test-port":
         values.port = Number(value);
-        break;
-      case "--host":
-        values.host = value;
         break;
       case "--connect-timeout-ms":
         values.connectTimeoutMs = Number(value);
@@ -5905,12 +5962,51 @@ function parseCliOptions(argv) {
           throw new MoneyHandError("INVALID_OPTION", "--args-json must be valid JSON");
         }
         break;
+      case "--call":
+        values.callMethod = value;
+        break;
+      case "--params-json":
+        try {
+          values.callParams = JSON.parse(value);
+        } catch {
+          throw new MoneyHandError("INVALID_OPTION", "--params-json must be valid JSON");
+        }
+        break;
+      case "--browser-root":
+        values.browserRoot = value;
+        break;
+      case "--profile-directory":
+        values.profileDirectory = value;
+        break;
+      case "--browser-executable":
+        values.browserExecutable = value;
+        break;
+      case "--launch-grace-ms":
+        values.launchGraceMs = Number(value);
+        break;
       default:
         throw new MoneyHandError("INVALID_OPTION", `Unknown option '${flag}'`);
     }
   }
-  if (values.once && values.taskPath) {
-    throw new MoneyHandError("INVALID_OPTION", "--once and --task are mutually exclusive");
+  const oneShotModes = [values.once, values.taskPath, values.callMethod, values.connect]
+    .filter(Boolean).length;
+  if (oneShotModes > 1) {
+    throw new MoneyHandError(
+      "INVALID_OPTION",
+      "--once, --task, --call, and --connect are mutually exclusive",
+    );
+  }
+  if (values.afterUserAction && !values.connect) {
+    throw new MoneyHandError(
+      "INVALID_OPTION",
+      "--after-user-action is valid only with --connect",
+    );
+  }
+  if (values.callParams !== undefined && !values.callMethod) {
+    throw new MoneyHandError("INVALID_OPTION", "--params-json requires --call or --connect");
+  }
+  if (values.taskArgs !== undefined && !values.taskPath) {
+    throw new MoneyHandError("INVALID_OPTION", "--args-json requires --task");
   }
   if (values.describe) {
     const incompatible = Object.keys(values).filter((key) => key !== "describe");
@@ -5981,9 +6077,10 @@ async function main(cliOutput) {
       "Usage:",
       "  node moneyhand.mjs [options]",
       "",
+      "Fixed endpoint:",
+      "  ws://127.0.0.1:19846/extension",
+      "",
       "Options:",
-      "  --host <127.0.0.1|localhost|::1>",
-      "  --port <0-65535>",
       "  --once",
       "  --once-timeout-ms <ms>",
       "  --connect-timeout-ms <ms>",
@@ -5992,8 +6089,17 @@ async function main(cliOutput) {
       "  --handshake-timeout-ms <ms>",
       "  --max-inflight <1-256>",
       "  --output-drain-timeout-ms <ms>",
+      "  --connect  Connect and return one bounded npc-moneyhand-connect/1 result",
+      "  --after-user-action  Allow the single user-confirmed connection retry",
+      "  --call <extension-method>",
+      "  --params-json <json>",
       "  --task <absolute-module.mjs>",
       "  --args-json <json>",
+      "  --browser-root <absolute-user-data-root>",
+      "  --profile-directory <name>",
+      "  --browser-executable <absolute-path>",
+      "  --launch-grace-ms <ms>",
+      "  --no-browser-launch",
       "  --describe  Print one offline npc-agent-cli-descriptor/1 JSON line",
       "  --version",
       "",
@@ -6033,13 +6139,22 @@ async function main(cliOutput) {
     outputDrainTimeoutMs,
     taskPath,
     taskArgs,
+    callMethod,
+    callParams,
+    connect,
+    afterUserAction = false,
+    autoLaunchBrowser = true,
+    browserRoot,
+    profileDirectory,
+    browserExecutable,
+    launchGraceMs,
     help: _help,
     version: _version,
     ...moneyhandCli
   } = cli;
   const moneyhand = createMoneyHand({
-    host: HOST_PROCESS.env.NPC_MONEYHAND_HOST ?? "127.0.0.1",
-    port: numericEnvironment("NPC_MONEYHAND_PORT", DEFAULT_PORT),
+    host: "127.0.0.1",
+    port: DEFAULT_PORT,
     pairingToken: HOST_PROCESS.env.NPC_MONEYHAND_PAIRING_TOKEN ?? "",
     connectTimeoutMs: numericEnvironment(
       "NPC_MONEYHAND_CONNECT_TIMEOUT_MS",
@@ -6063,44 +6178,111 @@ async function main(cliOutput) {
     "NPC_MONEYHAND_OUTPUT_DRAIN_TIMEOUT_MS",
     OUTPUT_DRAIN_TIMEOUT_MS,
   );
-  if (taskPath) {
+  if (taskPath || callMethod || connect) {
     let taskError;
     try {
-      const endpoint = await moneyhand.start();
-      await writeFatalLine(output, JSON.stringify({
-        type: "event",
-        event: "moneyhand.listening",
-        protocol: MONEYHAND_CONTROL_PROTOCOL,
-        endpoint,
-        pid: HOST_PROCESS?.pid ?? null,
-        capabilities: moneyhand.capabilities(),
-      }));
-      await moneyhand.wait({
-        timeoutMs: moneyhandCli.connectTimeoutMs
-          ?? numericEnvironment("NPC_MONEYHAND_CONNECT_TIMEOUT_MS", DEFAULT_CONNECT_TIMEOUT_MS),
-        signal: controller.signal,
-      });
       try {
-        const value = await runMoneyHandTask({
-          moneyhand,
-          taskPath,
-          args: taskArgs,
-          signal: controller.signal,
-        });
-        await writeFatalLine(output, JSON.stringify({
-          type: "result",
-          id: "task",
-          ok: true,
-          value: value ?? null,
-        }));
+        const endpoint = await moneyhand.start();
+        if (!connect) {
+          await writeFatalLine(output, JSON.stringify({
+            type: "event",
+            event: "moneyhand.listening",
+            protocol: MONEYHAND_CONTROL_PROTOCOL,
+            endpoint,
+            pid: HOST_PROCESS?.pid ?? null,
+            capabilities: moneyhand.capabilities(),
+          }));
+        }
+        const connectTimeoutMs = moneyhandCli.connectTimeoutMs
+          ?? numericEnvironment("NPC_MONEYHAND_CONNECT_TIMEOUT_MS", DEFAULT_CONNECT_TIMEOUT_MS);
+        const connection = autoLaunchBrowser
+          ? await ensureMoneyHandConnection({
+              moneyhand,
+              timeoutMs: connectTimeoutMs,
+              graceMs: boundedInteger(
+                launchGraceMs,
+                0,
+                60_000,
+                1_000,
+                "launchGraceMs",
+              ),
+              signal: controller.signal,
+              browserRoot,
+              profileDirectory,
+              browserExecutable,
+            })
+          : {
+              session: await moneyhand.wait({
+                timeoutMs: connectTimeoutMs,
+                signal: controller.signal,
+              }),
+              launched: false,
+              browser: null,
+            };
+        if (connect) {
+          await writeFatalLine(output, JSON.stringify({
+            type: "result",
+            id: "connect",
+            ok: true,
+            value: connectResult({
+              status: "connected",
+              nextAction: "ask_user_for_task",
+              userMessage: "MoneyHand 已连接，可以开始使用。你希望我现在操作哪个网页、完成什么任务？如果目标页面已经打开，请切到那个页面。",
+            }),
+          }));
+        } else {
+          await writeFatalLine(output, JSON.stringify({
+            type: "event",
+            event: "moneyhand.connected",
+            protocol: MONEYHAND_CONTROL_PROTOCOL,
+            session: connection.session,
+            launchedBrowser: connection.launched,
+            ...(connection.browser === null ? {} : {
+              browser: {
+                browserId: connection.browser.browserId,
+                profileDirectory: connection.browser.profileDirectory,
+                pid: connection.browser.pid,
+              },
+            }),
+          }));
+          const value = taskPath
+            ? await runMoneyHandTask({
+                moneyhand,
+                taskPath,
+                args: taskArgs,
+                signal: controller.signal,
+              })
+            : await moneyhand.request({
+                method: callMethod,
+                params: callParams === undefined ? {} : asObject(callParams, "call params"),
+              }, {
+                signal: controller.signal,
+                connectTimeoutMs: 0,
+              });
+          await writeFatalLine(output, JSON.stringify({
+            type: "result",
+            id: taskPath ? "task" : "call",
+            ok: true,
+            value: value ?? null,
+          }));
+        }
       } catch (error) {
-        taskError = normalizedError(error, "MONEYHAND_TASK_FAILED");
-        await writeFatalLine(output, JSON.stringify({
-          type: "result",
-          id: "task",
-          ok: false,
-          error: taskError,
-        }));
+        if (connect) {
+          await writeFatalLine(output, JSON.stringify({
+            type: "result",
+            id: "connect",
+            ok: true,
+            value: boundedConnectFailure(error, afterUserAction),
+          }));
+        } else {
+          taskError = normalizedError(error, "MONEYHAND_TASK_FAILED");
+          await writeFatalLine(output, JSON.stringify({
+            type: "result",
+            id: taskPath ? "task" : "call",
+            ok: false,
+            error: taskError,
+          }));
+        }
       }
     } finally {
       await moneyhand.stop({ graceMs: 0 }).catch(() => {});

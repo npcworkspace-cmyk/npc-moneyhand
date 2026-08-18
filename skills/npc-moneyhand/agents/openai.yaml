@@ -1,4 +1,4 @@
 interface:
   display_name: "NPC MoneyHand"
-  short_description: "Detect and control the MoneyHand Chromium extension"
-  default_prompt: "Use $npc-moneyhand to run the first-use preflight when needed, then start one task-owned browser controller and complete the browser task safely."
+  short_description: "Connect MoneyHand through one fixed startup flow"
+  default_prompt: "Use $npc-moneyhand. Follow only its bounded connection result. When connected, stop and ask me what browser task to perform; do not browse or test anything first."

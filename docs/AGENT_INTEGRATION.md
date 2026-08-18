@@ -8,9 +8,10 @@
 
 | 宿主能力 | 模式 |
 | --- | --- |
+| 只能运行本地命令、不能保持 stdin | `--connect` / `--call`，自动唤醒浏览器 |
 | 可导入本地 ESM | 任务内持有一个 `createMoneyHand()` |
 | 可维持双向子进程 | 持久 UTF-8 JSONL |
-| 只能做一个独立事务 | `--once` |
+| 已有单行 stdin 适配器 | `--once` |
 | 需要本地完成多步、减少 Agent 往返 | 可信 `--task <absolute-module.mjs>` |
 | 支持 Agent Skills | 安装或链接 `skills/npc-moneyhand` |
 
@@ -32,7 +33,7 @@ task start → start listener → wait extension → run all phases → stop in 
 - 运行多个可信次抛模块；
 - 叠加 Reddit 评论、红人开发等专项 Skill。
 
-它们必须复用这个 controller。不要为每个点击启动 CLI，不要让专项 Skill 各开一个 listener，不要跨 Agent 任务保留进程。
+持久任务必须复用这个 controller，不要让专项 Skill 各开一个 listener。无法维持子进程的宿主可让每个 `--call` 拥有一个完整的短生命周期。
 
 ## 安装与发现
 
@@ -49,17 +50,16 @@ npm run skill:install
 node scripts/install-skill.mjs --mode copy --target "<agent-skills-directory>"
 ~~~
 
-离线发现：
+首次实时连接：
 
 ~~~text
-moneyhand --describe
-moneyhand --version
+moneyhand --connect
 ~~~
 
 从源码运行：
 
 ~~~text
-node skills/npc-moneyhand/scripts/moneyhand.mjs --describe
+node skills/npc-moneyhand/scripts/moneyhand.mjs --connect
 ~~~
 
 机器可读入口：
@@ -72,20 +72,20 @@ node skills/npc-moneyhand/scripts/moneyhand.mjs --describe
 ## CLI
 
 ~~~text
-moneyhand [--host <loopback>] [--port <0-65535>]
+moneyhand
+moneyhand --connect [browser options]
+moneyhand --call <extension-method> [--params-json <json>] [browser options]
 moneyhand --once [connection options]
 moneyhand --task <absolute-module.mjs> [--args-json <json>]
 moneyhand --describe
 moneyhand --version
 ~~~
 
-端口 `0` 只适用于能从 startup event 读取动态 endpoint 的测试宿主；固定配置的 Extension 使用 `1–65535`。
+正式入口固定监听 `ws://127.0.0.1:19846/extension`。Agent 不扫描端口，Extension 不提供地址或端口配置。
 
 支持的环境变量：
 
 ~~~text
-NPC_MONEYHAND_HOST
-NPC_MONEYHAND_PORT
 NPC_MONEYHAND_PAIRING_TOKEN
 NPC_MONEYHAND_CONNECT_TIMEOUT_MS
 NPC_MONEYHAND_REQUEST_TIMEOUT_MS
@@ -138,7 +138,7 @@ import {
   createRateController
 } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
 
-const moneyhand = createMoneyHand({ host: "127.0.0.1", port: 19846 });
+const moneyhand = createMoneyHand();
 ~~~
 
 关键分层：
@@ -176,27 +176,21 @@ CLI 拥有 start/wait/stop；模块只拥有任务逻辑。任务模块是可信
 
 ## Profile 与 Task Space
 
-多个 Profile 可以连接同一端口，不需要人工别名。默认路由依次使用：
+多个 Profile 可以连接同一固定端口 `19846`，不需要人工别名。默认路由依次使用：
 
 1. 当前 focused session；
 2. 持久化的最后焦点时间；
 3. 稳定 session 顺序。
 
-独立读取可使用默认路由。依赖页面状态的工作必须创建 Task Space，固定 `instanceId + bootId` 和必要 tab ID。Extension reload、Chrome restart、Profile 替换或明确 handoff 后重新绑定。
+独立请求可使用默认路由。只有依赖页面状态的多步工作需要 Task Space 固定 `instanceId + bootId` 和必要 tab ID。Extension reload、Chrome restart、Profile 替换或明确 handoff 后重新绑定。
 
-每个请求声明 effect，例如 `read-only`、`navigation`、`input`、`download`、`upload`、`send`、`publish`。同一账号的写操作串行执行。
+Task Space 请求声明 effect，例如 `read-only`、`navigation`、`input`、`download`、`upload`、`send`、`publish`。普通 raw request 不需要 Task Space。
 
-## 高影响操作
+## 账号与发布操作
 
-`delete`、`payment`、`publish`、`send`、`upload` 和 `external-write` 需要近期、明确、来自用户的确认。审批令牌绑定：
+MoneyHand 对 `delete`、`payment`、`publish`、`send`、`upload` 和 `external-write` 不强制二次确认或审批令牌。收到 Agent 的明确动作请求后直接执行。授权与业务规则由调用 Agent 或专项 Skill 负责。
 
-- Task Space；
-- effect；
-- 精确 request 或 semantic ref/action；
-- 短 TTL；
-- 一次消费。
-
-低层 `request` 是可信开发者逃生口，不会理解业务含义；集成方不能用它绕过用户确认。
+旧 `approveTaskEffect` / `approveSemanticRefAction` API 仍可作为调用方自选的本地审计账本；传入 token 时会校验并消费，不传不会阻塞动作。
 
 ## 行为与 rate controller
 
@@ -225,7 +219,7 @@ rate controller 的执行模型是 `explicit-caller-scheduler`。低层 `request
 - 所需 operation 和 Extension wire method；
 - 平台 rate scope 和 stop signals；
 - checkpoint/去重格式；
-- effect 与审批要求。
+- effect 与调用方可选授权策略。
 
 执行时将现有 `moneyhand` 实例传给专项任务模块，或让一个宿主 JSONL 进程执行完整工作。禁止嵌套启动第二个控制台。
 

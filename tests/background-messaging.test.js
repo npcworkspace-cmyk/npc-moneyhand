@@ -21,15 +21,13 @@ test("background keeps only known popup message channels open and replies asynch
     const [listener] = fake.events.runtimeMessage.listeners;
     assert.equal(typeof listener, "function");
 
-    for (const type of ["popup.status", "popup.configure", "popup.stop"]) {
+    for (const type of ["popup.status", "popup.connect", "popup.stop"]) {
       let callbackCalls = 0;
       let resolveResponse;
       const response = new Promise((resolve) => {
         resolveResponse = resolve;
       });
-      const message = type === "popup.configure"
-        ? { type, address: "127.0.0.1", port: 19_846 }
-        : { type };
+      const message = { type };
       const returnValue = listener(message, {}, (value) => {
         callbackCalls += 1;
         resolveResponse(value);

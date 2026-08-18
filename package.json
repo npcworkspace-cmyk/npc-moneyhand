@@ -5,8 +5,7 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./skills/npc-moneyhand/scripts/moneyhand.mjs",
-    "./preflight": "./skills/npc-moneyhand/scripts/preflight.mjs"
+    ".": "./skills/npc-moneyhand/scripts/moneyhand.mjs"
   },
   "scripts": {
     "test": "node --test",

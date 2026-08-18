@@ -47,7 +47,7 @@ function createBridge(fake) {
   });
 }
 
-test("a fresh extension requires one explicit Save before exposing browser control", async (t) => {
+test("a fresh extension immediately connects to the fixed MoneyHand endpoint", async (t) => {
   FakeWebSocket.reset();
   const fake = createFakeChrome();
   const bridge = createBridge(fake);
@@ -55,27 +55,28 @@ test("a fresh extension requires one explicit Save before exposing browser contr
 
   const status = await bridge.start();
 
-  assert.equal(status.enabled, false);
+  assert.equal(status.enabled, true);
   assert.equal(status.wsEndpoint, "ws://127.0.0.1:19846/extension");
-  assert.equal(status.state, "DISABLED");
-  assert.equal(FakeWebSocket.instances.length, 0);
+  assert.equal(status.state, "CONNECTING");
+  assert.equal(FakeWebSocket.instances.length, 1);
 });
 
-test("simple configuration saves endpoint, preserves pairing, and reconnects", async (t) => {
+test("default reconnect migrates a legacy endpoint, preserves pairing, and reconnects", async (t) => {
   FakeWebSocket.reset();
   const fake = createFakeChrome();
   await fake.chrome.storage.local.set({
     enabled: false,
     profileAlias: "legacy-profile",
+    wsEndpoint: "ws://localhost:19847/extension",
     authToken: "legacy-secret-123456",
   });
   const bridge = createBridge(fake);
   t.after(() => bridge.stop());
 
-  const status = await bridge.configure({ address: "localhost", port: 19_847 });
+  const status = await bridge.connectDefault();
 
   assert.equal(status.enabled, true);
-  assert.equal(status.wsEndpoint, "ws://localhost:19847/extension");
+  assert.equal(status.wsEndpoint, "ws://127.0.0.1:19846/extension");
   assert.equal(status.state, "CONNECTING");
   assert.equal(fake.storage.profileAlias, "");
   assert.equal(fake.storage.authToken, "legacy-secret-123456");

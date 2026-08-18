@@ -19,7 +19,7 @@ const PRODUCTS = [
     packageName: "npc-moneyhand",
     packageRoot: join(ROOT, "skills", "npc-moneyhand"),
     script: join("scripts", "moneyhand.mjs"),
-    args: ["--port", "0"],
+    args: ["--internal-test-port", "0"],
     productProtocol: "npc-moneyhand-control/1",
     supported: true,
   },

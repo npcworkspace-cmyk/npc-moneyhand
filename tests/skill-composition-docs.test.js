@@ -18,8 +18,9 @@ async function sources() {
 test("specialized Skill composition keeps one-way ownership and an explicit creation boundary", async () => {
   const { skill, composition } = await sources();
 
-  assert.match(skill, /must declare its origins, bounds, effects, required operations/u);
-  assert.match(skill, /before creating or changing a specialized Skill/u);
+  assert.match(skill, /A specialized Skill may depend on `npc-moneyhand`/u);
+  assert.match(skill, /The specialized\s+Skill owns its platform or business workflow/u);
+  assert.doesNotMatch(skill, /references\/skill-composition\.md|agent-operations\.json/u);
   assert.match(composition, /Keep the dependency one-way/u);
   assert.match(composition, /MoneyHand and its\s+extension must never import, discover, or depend/u);
   for (const heading of [
@@ -62,7 +63,7 @@ test("specialized Skill boundaries prohibit duplicated control, credential expor
   for (const rule of [
     /must not:\s*[\s\S]*copy or fork the MoneyHand peer/u,
     /start a second listener, daemon, browser, remote-debugging endpoint/u,
-    /bypass Task Space binding, rate decisions, approvals/u,
+    /bypass unknown-outcome recovery, browser-session identity/u,
     /human behavior as permission to evade CAPTCHA/u,
     /export cookies, authorization headers, passwords, session tokens/u,
     /replay a write or unknown-outcome action automatically/u,
@@ -75,14 +76,14 @@ test("specialized Skill boundaries prohibit duplicated control, credential expor
   assert.match(composition, /prove exact completion or return a bounded incomplete result/u);
 });
 
-test("specialized Skill acceptance covers lifecycle, rate, approvals, exact scope, and real Profile evidence", async () => {
+test("specialized Skill acceptance covers lifecycle, rate, direct dispatch, exact scope, and real Profile evidence", async () => {
   const { composition } = await sources();
 
   for (const evidence of [
     "zero domain-owned controller `start()`/`stop()` calls",
     "creates and completes one Task Space",
     "rate plan before dispatch and observe afterward",
-    "High-impact effects fail before dispatch",
+    "High-impact effects dispatch without a mandatory MoneyHand approval token",
     "Exact-scope mismatch fails before browser dispatch",
     "zero automatic retries or destructive cleanup",
     "A separate real-Profile acceptance",

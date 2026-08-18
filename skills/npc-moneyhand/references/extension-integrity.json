@@ -12,13 +12,13 @@
   "files": [
     {
       "path": "background.js",
-      "bytes": 884,
-      "sha256": "3793896e2ebbae14e38648f548033cc9f9c84c2485df8b193d751fa32e4f20f0"
+      "bytes": 880,
+      "sha256": "85f966baf0ba4f8bec55829c2aeda2481fa488c05b7d3f23d56a70b4b77399e6"
     },
     {
       "path": "bridge.js",
-      "bytes": 43359,
-      "sha256": "61b68b61643bbf4469633221b9e645e1736e886d93449de73c115f1567693ae5"
+      "bytes": 43509,
+      "sha256": "be6c78cc9f1a8e399000ddb2f461b05523176e7729fc9397be05a1ab7ad69572"
     },
     {
       "path": "executor.js",
@@ -112,18 +112,18 @@
     },
     {
       "path": "popup.css",
-      "bytes": 1565,
-      "sha256": "60d71a800f9a0e955f109e1bb68eed450320bf1c2b40e2cf496315f7af33751d"
+      "bytes": 1255,
+      "sha256": "b6650679541e850547cdfe50ce2bbf0cf9dae46986ded905e7a45078150f5ba0"
     },
     {
       "path": "popup.html",
-      "bytes": 992,
-      "sha256": "c53e019a51fdd3fa099b22d713c91de1ad095ec6ef741668cee9b6b4edb5aa29"
+      "bytes": 684,
+      "sha256": "504658d7d94487460e6320fd73a7a91b50af1416e53a403880bcd71cf2c5c562"
     },
     {
       "path": "popup.js",
-      "bytes": 2985,
-      "sha256": "38eb826bbf2e1c5933a2d8a2afa42f3b62d1ecd30a9a64b575109967065597df"
+      "bytes": 1604,
+      "sha256": "4d69687742173e53bb75b79d63860d6e5626e15226e8dda1f8ef4c92c1329d6b"
     },
     {
       "path": "protocol.js",

@@ -13,7 +13,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const PREFLIGHT_SCHEMA = "npc-moneyhand-preflight/1";
+export const BROWSER_DISCOVERY_SCHEMA = "npc-moneyhand-browser-discovery/1";
 export const MINIMUM_NODE_MAJOR = 20;
 export const EXTENSION_INTEGRITY_SCHEMA = "npc-moneyhand-extension-integrity/1";
 export const EXTENSION_REPOSITORY_URL = "https://github.com/npcworkspace-cmyk/npc-moneyhand";
@@ -1215,7 +1215,7 @@ export async function discoverMoneyHand({
     > reportedUnverifiedCandidates.length;
 
   return {
-    schema: PREFLIGHT_SCHEMA,
+    schema: BROWSER_DISCOVERY_SCHEMA,
     product: "npc-moneyhand",
     runtime: {
       platform,
@@ -1285,7 +1285,6 @@ export async function discoverMoneyHand({
       },
       extensionFound: installations.length > 0,
       runtimeSupported,
-      controllerPreflightPassed: controllerStartEligible,
       controllerStartEligible,
       eligibilityScope: "complete-scan-with-enabled-declared-integrity-match",
       liveHandshakeRequired: true,

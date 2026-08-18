@@ -1,45 +1,38 @@
 # 故障处理
 
-先记录四项：`moneyhand --describe`、`moneyhand.listening`、Extension 弹窗地址/端口、`chrome://extensions` 中的版本与错误。不要先重装或盲重放动作。
-
-## 保存后没有连接
-
-检查：
-
-1. 控制台是否已经输出 `moneyhand.listening`；
-2. host/port 是否与弹窗完全一致；
-3. Extension 路径是否是 `/extension`（弹窗自动添加）；
-4. Chrome 和 Extension 是否启用；
-5. 是否有另一个进程占用端口；
-6. `127.0.0.1` 与 `::1` 是否混用；
-7. Extension Service Worker 控制台是否有握手或 Origin 错误。
-
-启动探针：
+首次安装和连接不要从本页自由排查。进入已经安装的基础 Skill 目录，只执行一次：
 
 ~~~text
-node skills/npc-moneyhand/scripts/moneyhand.mjs --host 127.0.0.1 --port 19846
+node scripts/moneyhand.mjs --connect
 ~~~
 
-Extension 是主动连接方。活跃 worker 通常在短退避后重试，休眠 worker 依靠持久 alarm。Chrome 已关闭、扩展禁用或电脑休眠时，端口不能把它唤醒。
+只读取 id 为 `connect` 的 `npc-moneyhand-connect/1` 结果并执行 `nextAction`。外层
+`ok: true` 只表示命令返回了有界结果；只有 `value.connected: true` 且
+`value.status: connected` 才表示已连接。
 
-## 卡在 CONNECTING
+| 结果 | 唯一处理 |
+| --- | --- |
+| `connected` | 转述 `userMessage`，询问用户要做什么，然后等待。 |
+| `install_extension` | 转述 `userMessage`，等待用户完成安装、打开浏览器并点击“立即连接”。 |
+| `open_browser_and_click_extension` | 转述 `userMessage`，等待用户打开浏览器并点击“立即连接”。 |
+| `blocked` | 转述 `userMessage` 并停止。 |
 
-常见原因：
+用户完成任一人工动作后，只运行结果中返回的同一个 `retryCommand` 一次：
 
-- listener 未启动或 host/port 不匹配；
-- 本机防火墙/安全软件拦截 Node loopback；
-- Upgrade 不是精确 `/extension`；
-- 端口对应另一个服务；
-- 配对 token 与 Extension 预置 token 不一致；
-- Skill/Extension wire 版本不同。
+~~~text
+node scripts/moneyhand.mjs --connect --after-user-action
+~~~
 
-不要把 listener 改成 `0.0.0.0`。MoneyHand 有意只允许 loopback。
+第二次仍未连接就停止。不要扫描端口、查看 Service Worker、读源码、执行 `--describe`、运行
+项目测试、修改 Profile、重写 controller、切换 Playwright 或继续猜测原因。宿主不能运行本地
+Node.js 20+ 时，报告前置条件并停止。
 
-## 地址已被占用
+## `CONTROLLER_BUSY`
 
-一个端口只能由一个 Agent 任务拥有。结束旧 controller 并确认其 stdout EOF，再重启当前任务。不要让专项 Skill 单独再开 listener。
+固定端口正在被另一个本地 MoneyHand 任务拥有。转述返回的 `userMessage` 并停止。不要换
+端口、结束未知进程或启动第二个 listener。
 
-若不确定旧进程是否仍在处理写动作，先检查页面/业务状态；强制结束进程不会证明动作未执行。
+以下各节只供已经连接并收到明确用户任务后的执行或适配器开发使用，不属于首次连接流程。
 
 ## 已连接但控制的是另一个 Profile
 
@@ -158,13 +151,5 @@ human 模式只改变输入节奏。rate controller 不保证绕过限制，也�
 
 缺少任一项都不能声称 Agent 已消费全部结果。
 
-## 最小诊断命令
-
-~~~text
-node --version
-node skills/npc-moneyhand/scripts/moneyhand.mjs --version
-node skills/npc-moneyhand/scripts/moneyhand.mjs --describe
-npm run check
-~~~
-
-涉及真实 Profile 再按 [REAL_CHROME_TEST.md](./REAL_CHROME_TEST.md) 分层验证。不要用本地单元测试替代用户当前 Chrome 证据。
+维护者的真实 Profile 验收另见 [REAL_CHROME_TEST.md](./REAL_CHROME_TEST.md)，不能作为 Agent
+首次连接失败时的替代路径。

@@ -4,12 +4,10 @@
   "description": "Zero-dependency Agent skill and control console for the npc-moneyhand Chrome extension",
   "type": "module",
   "exports": {
-    ".": "./scripts/moneyhand.mjs",
-    "./preflight": "./scripts/preflight.mjs"
+    ".": "./scripts/moneyhand.mjs"
   },
   "bin": {
-    "moneyhand": "./scripts/moneyhand.mjs",
-    "moneyhand-preflight": "./scripts/preflight.mjs"
+    "moneyhand": "./scripts/moneyhand.mjs"
   },
   "files": [
     "agents",
