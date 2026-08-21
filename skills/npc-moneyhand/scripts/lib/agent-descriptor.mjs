@@ -572,7 +572,7 @@ export async function createAgentCliDescriptor(options = {}) {
       programmatic: transports.programmatic === true || transports.esm === true,
       persistentJsonl: transports.jsonl?.persistent === true,
       oneShot: transports.jsonl?.oneShot === true,
-      taskModule: transports.taskModule?.trustedLocalCode === true,
+      taskModule: transports.taskModule?.security === "trusted-local-code",
     },
     runtime: {
       node: hostProcess.versions.node,

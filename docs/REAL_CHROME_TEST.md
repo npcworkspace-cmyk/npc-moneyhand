@@ -84,7 +84,7 @@ npm run e2e:chrome
 - [ ] human/自定义节奏确实增加可测时延；
 - [ ] `behavior.reset` 回到 raw；
 - [ ] 页面文字优先；
-- [ ] screenshot 只在显式调用后出现；
+- [ ] 低层 Extension screenshot 只由明确请求触发；无异常的成功快路径不产生自动截图；
 - [ ] 测试 tab 和 listener 按脚本终态回收。
 
 ## C. 最近焦点与 Task Space
@@ -116,7 +116,12 @@ npm run e2e:chrome
 - [ ] unknown method 返回有界 text context；
 - [ ] waiting tab 的写操作被阻止；
 - [ ] `instruction.resolve` 恢复或取消；
-- [ ] 没有自动截图；
+- [ ] `needs_instruction`、导航等待超时、遮挡和 stale/ambiguous ref 会自动返回当前视口 PNG；
+- [ ] 任务启动后立即有 progress，运行中每 10 秒内至少一条 heartbeat；
+- [ ] 模拟 15 秒无任务活动时出现 `state:"visual_fallback"`，且原动作没有被重放；
+- [ ] 同步阻塞超过 10 秒时前台 CLI 输出 `moneyhand.task_monitor`，恢复后在窗口清理前补截图；
+- [ ] `TASK_TIMEOUT`、失败或 `incomplete` 终态在有固定任务页时携带清理前截图；
+- [ ] 自动视觉证据隐藏 `waitId`、raw `tabId` 和 base64，最多 120 次；
 - [ ] viewport screenshot 的像素/CSS 比例有记录；
 - [ ] full-page 图片没有直接用于 input。
 

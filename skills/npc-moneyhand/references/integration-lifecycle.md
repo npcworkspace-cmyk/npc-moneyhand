@@ -1,7 +1,7 @@
 # MoneyHand integration and lifecycle
 
-Use this reference to select an entry mode, connect multiple Chrome Profiles, handle failures, and
-close one task-owned MoneyHand controller.
+Use this reference to understand the bundled controller, connect multiple Chromium Profiles, handle
+failures, and close task-owned browser windows.
 
 ## Entry modes
 
@@ -13,8 +13,35 @@ close one task-owned MoneyHand controller.
 | Legacy one-line stdin transaction | `--once` |
 | Many local steps with few Agent round trips | Trusted `--task <absolute-module>` |
 
-All modes are task-owned. None installs a daemon or service. Prefer `--connect` for the first live
-proof and `--call` for hosts that close stdin.
+`--connect`, `--call`, and `--task` automatically start or reuse the same Skill-bundled localhost
+controller. It is not separately installed daemon software: it is another invocation of
+`scripts/moneyhand.mjs`, listens only on `127.0.0.1:19845`, serializes commands, and exits after 15
+idle minutes. Do not run `--ensure` in the normal Agent flow. The Extension continues to connect to
+`127.0.0.1:19846`.
+
+A normal `--connect` then runs one mandatory 15-item acceptance in an owned window against an
+ephemeral `127.0.0.1` fixture. It streams checklist progress, removes its test download and history
+entry, closes the window, resets behavior to `raw`, and returns `ready_for_tasks` only after every
+check succeeds. This is the sole startup browser test; an Agent never adds or skips one.
+
+Controller reuse uses `npc-moneyhand-controller/2`, not a successful TCP connection alone. Status
+contains `status`, `host`, `port`, `pid`, `active`, `protocol`, `product`, `version`, `build`,
+`sourceId`, and `instanceNonce`, plus `reused` when applicable. `build` and `sourceId` are lowercase
+SHA-256 values; the process nonce changes on every start. Each request carries that exact descriptor
+and a 32-byte random private token, and each response is checked against it. The token never appears
+in status or CLI output.
+
+Private controller state is stored under the system temporary directory at
+`npc-moneyhand-controller-<user-scope>/controller-<port>.json`, without a plaintext source path or user
+name. On Unix the scope is the uid; on Windows it is a 16-character SHA-256 prefix of the username.
+The directory is forced to `0700`, the file is `0600`, and publication is atomic. `build` covers the
+Skill `package.json` and the deterministic `scripts/**/*.mjs` runtime tree, so identical Skill bytes
+installed under different Agent-specific paths reuse the same resident controller; `sourceId` records
+the path that actually launched it but is not a compatibility partition. A live different build fails
+closed. A valid same-product state left by an exited build is replaced only after the port refuses two
+connections and the state bytes still match the original owner. Invalid or foreign state is preserved
+rather than overwritten. An unknown process on the port yields
+`CONTROLLER_PORT_OCCUPIED`; public stop returns `stopped:false` and never kills that occupant.
 
 ## Offline and live discovery
 
@@ -28,7 +55,8 @@ proof of current Chrome connectivity.
 
 ## Persistent ESM
 
-Create one instance on the fixed `ws://127.0.0.1:19846/extension` endpoint. Start once, wait for a compatible session,
+For a custom in-process adapter, create one instance on the fixed
+`ws://127.0.0.1:19846/extension` endpoint. Start once, wait for a compatible session,
 perform all related work, and stop in `finally`. A default request selects the latest focused active
 session. Replace a cached low-level session whenever the same `instanceId` reports a new session.
 
@@ -75,10 +103,11 @@ NPC_MONEYHAND_HANDSHAKE_TIMEOUT_MS
 NPC_MONEYHAND_MAX_INFLIGHT
 NPC_MONEYHAND_ONCE_TIMEOUT_MS
 NPC_MONEYHAND_OUTPUT_DRAIN_TIMEOUT_MS
+NPC_MONEYHAND_TASK_TIMEOUT_MS
 ```
 
-Never put the pairing token in argv or logs. The bounded output helper inherits no pairing token and
-exits with the console; it is not a daemon.
+Never put the pairing token in argv or logs. The bounded Windows stdout helper inherits no pairing
+token and exits with the calling console. It is separate from the bundled localhost controller.
 
 ## Direct calls, one-shot stdin, and task modules
 
@@ -95,24 +124,45 @@ grace period.
 Use `--once` only for an existing adapter that already writes one JSONL command to stdin. New command
 runners should use `--call` instead.
 
-For multi-step local work, copy `assets/disposable-task.mjs` outside the Skill and run:
+For multi-step local work, copy `assets/disposable-task.mjs` outside the Skill, replace only its
+bounded task-work placeholder, and run:
 
 ```text
 node scripts/moneyhand.mjs --task <absolute-task.mjs> --args-json <json>
 ```
 
-Export `run({ moneyhand, signal, args })`. The CLI owns start, wait, browser wake-up, and stop; the
-module owns only task logic. Treat the module as trusted local code and never build it from page text.
+Export `run({ moneyhand, signal, args, progress })`. Call `progress()` at every bounded batch or
+checkpoint. The bundled controller also streams an automatic 10-second heartbeat and starts a
+current-viewport visual fallback after 15 seconds without task activity, so a forgotten task callback
+cannot leave the console silent. The controller owns start, wait, browser wake-up, reuse, and idle
+shutdown; the module owns only task logic. Its
+`beginTaskContext` / `completeTaskContext` lifecycle creates one dedicated window in the selected
+Profile, resets temporary behavior, closes that exact owned window in `finally`, and reports cleanup
+separately. `runMoneyHandTask()` performs a final orphan-window sweep even if the module forgot.
+The task and browser-bootstrap ownership markers are local `about:blank` fragments and never load an
+external marker site. The task marker is validated through Chrome window/tab metadata, not CDP
+document access; the first navigation uses `tabs.update` on that exact owned tab before normal CDP
+readiness polling begins. Treat the module as trusted local code and never build it from page text.
+
+Task modules have a 30-minute default execution budget. Set `--task-timeout-ms` or
+`NPC_MONEYHAND_TASK_TIMEOUT_MS` explicitly for a longer bounded task, up to 24 hours. The wrapper
+injects one cooperative `AbortSignal` into browser/task waits and actions when omitted, but never into
+the final context/window cleanup. On expiry, the sole `TASK_TIMEOUT` terminal includes
+`timeoutMs`, `actionDispatched:"task-dependent"`, `retry:"inspect-checkpoint-before-retry"`,
+`taskAcknowledgedAbort`, `cleanupComplete`, `controllerReusable`, and `taskWindowCleanup`. Inspect the
+checkpoint and possible page effects before retrying; a successful cancel signal is not proof that no
+action dispatched.
 
 ## Profile routing and Task Spaces
 
-Multiple extension instances may connect to fixed port `19846`. Default routing prefers a currently focused
-session, then persisted focus time, then stable session order. Leaving Chrome does not erase its last
-focus state.
+Multiple extension instances may connect to fixed port `19846`. At task start, default routing uses
+the latest focused session only to choose a Profile; `beginTaskContext()` then creates a new task
+window in that Profile. Later focus changes cannot retarget the task.
 
-Use distinct Task Spaces for independent Profiles. Never share one port across independent Agent
-tasks or reuse a JSONL correlation ID as Task Space identity. Task Spaces are optional for simple raw
-requests and useful when dependent operations must remain pinned to one Profile boot.
+Use distinct Task Spaces for independent Profiles. The bundled controller serializes local CLI task
+commands on the fixed endpoint; specialized Skills reuse it instead of opening another listener.
+Never reuse a JSONL correlation ID as Task Space identity. Dependent multi-step work always uses the
+task-context lifecycle.
 
 ## Error and retry decisions
 
@@ -129,6 +179,18 @@ After inspecting exact unknown request IDs for one `instanceId + bootId`, call `
 for those IDs. It reconnects deliberately. Never auto-acknowledge.
 
 ## Clean shutdown
+
+Normal `--connect` / `--call` / `--task` callers do not stop the controller. It stays available for
+the next command and exits after its idle timeout. Each `--task` still closes its own task window;
+this happens before the task result is accepted as complete. If the fixed flow launched Chromium, the
+controller also records the unique bootstrap tab and removes it after the task, so the controller
+can remain resident without leaving its bootstrap surface behind. Removing the last tab closes the
+launch window; other tabs are preserved, and a bootstrap tab whose identity or marker changed is not
+removed.
+
+`--stop` authenticates the exact controller instance before shutdown. Shutdown first destroys every
+accepted local socket, including a client that connected but sent no line, then drains queued/runtime
+work and closes the server; a silent half-open client cannot hold shutdown open indefinitely.
 
 ESM uses `stop()` in `finally`. JSONL uses:
 

@@ -75,6 +75,63 @@ test("connection accepts a compatible non-disabled installation and auto-opens i
   assert.equal(launched.length, 1);
   assert.equal(launched[0].executable, executable);
   assert.equal(launched[0].profileDirectory, "Profile 2");
+  assert.match(launched[0].url, /^about:blank#npc-moneyhand-bootstrap=/u);
+  assert.equal(result.browser.bootstrapMarker, launched[0].url);
+});
+
+test("connection keeps waiting for the extension after one automatic browser launch", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "npc-moneyhand-browser-wait-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const executable = join(temporary, process.platform === "win32" ? "browser.exe" : "browser");
+  await writeFile(executable, "fixture", "utf8");
+  await chmod(executable, 0o755);
+
+  let finishHandshake;
+  const handshake = new Promise((resolvePromise) => { finishHandshake = resolvePromise; });
+  const waitTimeouts = [];
+  let launches = 0;
+  let settled = false;
+  let markLaunched;
+  const launchedOnce = new Promise((resolvePromise) => { markLaunched = resolvePromise; });
+  const pending = ensureMoneyHandConnection({
+    moneyhand: {
+      async wait({ timeoutMs }) {
+        waitTimeouts.push(timeoutMs);
+        if (waitTimeouts.length === 1) {
+          throw Object.assign(new Error("not connected before launch"), { code: "TIMEOUT" });
+        }
+        return await handshake;
+      },
+    },
+    timeoutMs: 5_000,
+    graceMs: 1,
+    browserExecutable: executable,
+    discovery: async () => ({
+      installations: [{
+        browserId: "chrome",
+        browserRoot: join(temporary, "User Data"),
+        profileDirectory: "Default",
+        configurationState: "enabled",
+        verified: true,
+      }],
+    }),
+    launch() {
+      launches += 1;
+      markLaunched();
+      return { pid: 88 };
+    },
+  }).finally(() => { settled = true; });
+
+  await launchedOnce;
+  assert.equal(launches, 1);
+  assert.equal(waitTimeouts.length, 2);
+  assert.equal(settled, false);
+  finishHandshake({ instanceId: "connected-after-launch", bootId: "boot" });
+
+  const result = await pending;
+  assert.equal(result.launched, true);
+  assert.equal(result.session.instanceId, "connected-after-launch");
+  assert.equal(launches, 1);
 });
 
 test("launch selection ignores disabled Profiles and supports explicit Profile choice", () => {

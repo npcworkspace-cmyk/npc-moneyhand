@@ -3814,7 +3814,7 @@
               "domcontentloaded",
               "load"
             ],
-            "default": "load"
+            "default": "domcontentloaded"
           },
           "expectedUrl": {
             "type": "string",
@@ -4041,7 +4041,7 @@
               "domcontentloaded",
               "load"
             ],
-            "default": "load"
+            "default": "domcontentloaded"
           },
           "expectedUrl": {
             "type": "string",

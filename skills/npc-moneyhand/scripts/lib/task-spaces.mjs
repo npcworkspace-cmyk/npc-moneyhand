@@ -173,7 +173,9 @@ export class TaskSpaceRegistry {
     space.keep = options.keep;
     space.completedAt = timestamp;
     space.updatedAt = timestamp;
-    return publicSpace(space);
+    const completed = publicSpace(space);
+    if (!space.keep) this.spaces.delete(space.id);
+    return completed;
   }
 }
 

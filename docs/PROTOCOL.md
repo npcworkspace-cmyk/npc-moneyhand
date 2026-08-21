@@ -186,7 +186,7 @@ Extension 的去重是有界保护，不是永久幂等存储。缓存淘汰后�
 }
 ~~~
 
-进入 `needs_instruction` 后该 tab 的写操作暂停；`observe.context` / `observe.screenshot` 和 `instruction.resolve` 仍可用。单条终态最多 8 MiB，最近终态缓存总计最多 16 MiB。
+进入 `needs_instruction` 后该 tab 的写操作暂停；`observe.context` / `observe.screenshot` 和 `instruction.resolve` 仍可用。单条终态最多 8 MiB，最近终态缓存总计最多 16 MiB。Extension 只响应明确的截图请求；基础 Skill 的 task runtime 会在页面异常或 15 秒任务静默时自动发出这条明确请求，并把本地 PNG 路径作为 `moneyhand.task_progress` 返回。
 
 ## 事件
 
@@ -222,7 +222,7 @@ Extension 的去重是有界保护，不是永久幂等存储。缓存淘汰后�
 | 行为 | `behavior.get/set/reset` | raw/human 与 TTL |
 | 事件 | `events.subscribe/unsubscribe` | 简单通配符订阅 |
 | 文本观察 | `observe.context` | URL、标题、readyState、正文与控件摘要 |
-| 截图 | `observe.screenshot` | 只有显式调用才执行 |
+| 截图 | `observe.screenshot` | Extension 只有收到明确请求才执行；task runtime 可按异常/静默策略自动发出该请求 |
 | 求助恢复 | `instruction.resolve` | `resume` 或 `cancel` |
 
 精确参数和结果 schema 以 machine contract 为准。

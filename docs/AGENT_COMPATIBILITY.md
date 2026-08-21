@@ -7,19 +7,24 @@
 | 交付物 | 版本 | 协议 | 最低运行环境 |
 | --- | --- | --- | --- |
 | `npc-moneyhand` Skill | `1.0.0` | `npc-moneyhand-control/1`、`npc-agent-jsonl/1` | Node.js 20+ |
+| Skill 内置 controller | `1.0.0` | `npc-moneyhand-controller/2` | loopback `127.0.0.1:19845` |
 | Chrome Extension | `1.0.0` | `npc-moneyhand/2` | Chrome/Chromium 125+ |
 
-两者来自同一仓库 Release。最安全的组合是相同 Git commit 或相同 release manifest；不承诺跨任意未发布提交的私有 API 兼容。
+三者来自同一仓库 Release。最安全的组合是相同 Git commit 或相同 release manifest；不承诺跨任意未发布提交的私有 API 兼容。
 
 ## 硬兼容规则
 
 1. Skill 与 Extension 必须精确声明 wire `npc-moneyhand/2`。
 2. Agent adapter 必须发现 control `npc-moneyhand-control/1`、`args` envelope、startup/stopped event 和 operation catalog。
-3. Skill 与 Extension 都使用固定 `ws://127.0.0.1:19846/extension`，不协商或扫描端口。
+3. 内置 controller 固定使用 `127.0.0.1:19845`；Skill 与 Extension 固定使用
+   `ws://127.0.0.1:19846/extension`，不协商或扫描端口。
 4. `instanceId + bootId` 只固定当前 Profile boot。Extension reload、Chrome restart 或 Profile 替换后重新建 Task Space。
 5. semantic snapshot/ref、可选决策记录令牌和 unknown-outcome ACK 不跨 boot 复用。
 6. descriptor/catalog 不匹配时 fail closed；不要用旧字段继续写操作。
-7. 固定端口 `19846` 只属于一个 Agent 任务，不支持多个独立 controller 竞争。
+7. `19845` 上只复用运行时 build 与私有凭据匹配的内置 controller；相同 Skill 字节可跨
+   Agent 安装目录复用，`sourceId` 只保留实际启动来源。未知占用或活着的旧构建 fail closed，
+   不终止占用进程。多个 Profile Extension 可以连接 `19846`，任务由内置
+   controller 串行接收并用 Task Space 固定。
 8. 页面外表面只支持 human takeover，不因操作系统不同而自动添加本地输入后端。
 
 ## 平台边界
@@ -39,11 +44,13 @@
 
 1. 记录 Git commit、`moneyhand --describe` 和 Extension 版本。
 2. 运行 `npm run check`；如交付 package，再运行 packaged acceptance。
-3. 停止当前 controller，确认 `moneyhand.stopped` 和 stdout EOF。
+3. 用当前版本执行 `moneyhand --stop`，确认唯一结果为 `stopped:true`；在覆盖 Skill 文件前完成这一步。
 4. 更新 `npc-moneyhand` Skill。
 5. 在 `chrome://extensions` reload 同一 Release 的 `extension`；同一 Profile 不要同时启用两个版本。
-6. 启动新 controller，先做 `--describe`、`status`、`wait` 和 `target.list` 只读探针。
-7. 重新创建 Task Space，再验证语义动作、human TTL/reset 和 rate controller。
+6. 先运行 `--describe` 做离线契约检查，再按唯一 `--connect` 流程启动新 controller；等待内置
+   localhost 全功能验收与清理完成，不追加枚举或外部测试网站。
+7. `ready_for_tasks` 后再询问用户任务；只有用户指定的版本验收需要额外验证 rate controller
+   或账号相关页面。
 8. 最后恢复有账号影响或高频的任务。
 
 若第 4–7 步失败，先停止新 controller，再恢复匹配的一对旧 Skill/Extension。未知动作未核查前不要因为回滚而重放。
@@ -109,9 +116,10 @@ node scripts/install-skill.mjs --action rollback --mode copy --target "<skills-d
 兼容与否取决于能力，不取决于 Agent 品牌：
 
 - 能否在用户电脑启动 Node 20+；
-- 能否持续 drain UTF-8 stdout 并写 stdin；
+- 能否至少运行一次本地 no-stdin 命令；需要 JSONL 时，能否持续 drain UTF-8 stdout 并写 stdin；
 - 能否访问 loopback；
 - 能否在任务结束回收进程；
 - 能否把结果未知反馈给 Agent，并在重试前核查真实状态。
 
-只有远程 MCP/聊天、无法访问本机进程或 Chrome Extension 的宿主，需要自己的受控本地适配层；本项目不会为此恢复常驻 daemon。
+只有远程 MCP/聊天、无法访问本机进程或 Chrome Extension 的宿主，需要自己的受控本地适配层；
+Skill 内置 controller 不是远程桥接服务，也不暴露非 loopback 接口。

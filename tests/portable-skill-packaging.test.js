@@ -31,6 +31,36 @@ async function hash(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+test("portable Skill CI builds and uploads the ZIP with both integrity files", async () => {
+  const workflow = await readFile(join(root, ".github", "workflows", "portable-skill.yml"), "utf8");
+  assert.match(workflow, /run: npm run skill:pack:portable/u);
+  for (const path of [
+    "artifacts/portable-skill/npc-moneyhand-portable-skill-*.zip",
+    "artifacts/portable-skill/portable-manifest.json",
+    "artifacts/portable-skill/SHA256SUMS.txt",
+  ]) {
+    assert.ok(workflow.includes(path), `portable CI does not upload ${path}`);
+  }
+  assert.match(workflow, /name: npc-moneyhand-portable-skill/u);
+  assert.match(workflow, /if-no-files-found: error/u);
+});
+
+test("tag releases checksum-gate and publish the portable Skill without checksum-name collisions", async () => {
+  const workflow = await readFile(join(root, ".github", "workflows", "release.yml"), "utf8");
+  assert.match(workflow, /npm run skill:pack:portable/u);
+  assert.match(workflow, /cd artifacts\/portable-skill[\s\S]*sha256sum --check SHA256SUMS\.txt/u);
+  assert.match(workflow, /name: npc-moneyhand-portable-skill/u);
+  for (const path of [
+    "artifacts/portable-skill/npc-moneyhand-portable-skill-*.zip",
+    "artifacts/portable-skill/portable-manifest.json",
+    "artifacts/portable-skill/SHA256SUMS.txt",
+  ]) {
+    assert.ok(workflow.includes(path), `release build does not upload ${path}`);
+  }
+  assert.match(workflow, /npc-moneyhand-portable-skill-SHA256SUMS\.txt/u);
+  assert.match(workflow, /assets\+=\([\s\S]*\$portable_zip[\s\S]*portable-manifest\.json[\s\S]*npc-moneyhand-portable-skill-SHA256SUMS\.txt/u);
+});
+
 async function filesBelow(directory, prefix = "") {
   const files = [];
   const entries = await readdir(directory, { withFileTypes: true });

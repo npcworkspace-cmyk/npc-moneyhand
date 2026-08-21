@@ -22,7 +22,8 @@ Agent /专项 Skill
 2. CDP Network JSON 或明确只读的同会话请求；
 3. CDP Runtime/DOM 批量读取；
 4. 只为懒加载、分页或浏览器状态使用 UI；
-5. 文本不足后才显式截图。
+5. 文本不足后才请求任务产物截图；等待超时、遮挡、语义/页面异常或 15 秒任务静默会自动抓当前视口，
+   作为恢复证据而不是默认采集数据面。
 
 这条顺序受授权、账号状态和目标完整性约束。可见接口不自动等于允许重放的接口。
 
@@ -91,7 +92,12 @@ rate controller 的 `plan/observe/checkpoint` 是本地有界状态计算；它�
 
 ## 截图成本
 
-截图需要编码、传输和可能的像素到 CSS 坐标换算。默认不用截图；`observe.context` 先返回有界文本。full-page screenshot 不可直接用于 viewport input。
+截图需要编码、传输和可能的像素到 CSS 坐标换算。成功快路径仍不截图；`observe.context` 与语义快照先
+返回有界结构。异常路径会自动生成一张本地当前视口 PNG，持续静默时有界重复、每任务最多 120 张。
+这是用少量视觉成本换取更低的卡死与误判成本。full-page screenshot 不可直接用于 viewport input。
+
+控制台任务启动后立即输出进度，并至少每 10 秒输出 heartbeat。专项 Skill 应在批次/checkpoint 主动
+补充 `current/total`；自动 heartbeat 是防止“脚本挂了没人知道”的底线，不是业务完成证明。
 
 ## 本地基准
 

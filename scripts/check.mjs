@@ -68,6 +68,11 @@ const requiredFiles = [
   "skills/npc-moneyhand/package.json",
   "skills/npc-moneyhand/agents/openai.yaml",
   "skills/npc-moneyhand/assets/disposable-task.mjs",
+  "skills/npc-moneyhand/assets/connect-acceptance.mjs",
+  "skills/npc-moneyhand/assets/specialized-task.mjs",
+  "skills/npc-moneyhand/references/task-runtime.md",
+  "skills/npc-moneyhand/references/task-recovery.md",
+  "skills/npc-moneyhand/references/behavior-modes.md",
   "skills/npc-moneyhand/references/moneyhand-contract.json",
   "skills/npc-moneyhand/references/agent-operations.json",
   "skills/npc-moneyhand/references/agent-hosts.md",
@@ -75,6 +80,7 @@ const requiredFiles = [
   "skills/npc-moneyhand/references/learning-and-approvals.md",
   "skills/npc-moneyhand/scripts/lib/browser-discovery.mjs",
   "skills/npc-moneyhand/scripts/lib/browser-launch.mjs",
+  "skills/npc-moneyhand/scripts/lib/controller-service.mjs",
   "skills/npc-moneyhand/scripts/moneyhand.mjs",
   "skills/npc-moneyhand/scripts/lib/agent-descriptor.mjs",
   "skills/npc-moneyhand/scripts/lib/peer.mjs",
@@ -102,6 +108,7 @@ for (const path of [
   "packages/npc-moneydesk/package.json",
   "skills/npc-moneyoperator/package.json",
   "skills/npc-moneyhand/scripts/operator.mjs",
+  "scripts/lib/visual-acceptance.mjs",
   "packaging/npm/npc-moneyoperator.README.md",
 ]) {
   if (existsSync(join(root, path))) fail(`retired product path must stay removed: ${path}`);
@@ -141,10 +148,16 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.agentInterop?.argumentPolicy?.mixedWithTopLevel !== "reject"
   || contract.automaticConnection?.command !== "--connect"
   || contract.automaticConnection?.resultSchema !== "npc-moneyhand-connect/1"
-  || contract.automaticConnection?.successNextAction !== "ask_user_for_task"
+  || contract.automaticConnection?.successNextAction !== "ready_for_tasks"
   || contract.automaticConnection?.userRetryFlag !== "--after-user-action"
   || contract.automaticConnection?.maximumUserConfirmedRetries !== 1
-  || contract.automaticConnection?.runsBrowserOperation !== false
+  || contract.automaticConnection?.runsBrowserOperation !== true
+  || contract.automaticConnection?.automaticAcceptance?.mandatoryOnNormalConnect !== true
+  || contract.automaticConnection?.automaticAcceptance?.scope !== "localhost-owned-task-window"
+  || contract.automaticConnection?.automaticAcceptance?.checks?.length !== 15
+  || contract.automaticConnection?.automaticAcceptance?.closesTaskWindow !== true
+  || contract.automaticConnection?.automaticAcceptance?.resetsBehaviorToRaw !== true
+  || contract.automaticConnection?.automaticAcceptance?.removesDownloadArtifact !== true
   || contract.automaticConnection?.outerOkMeaning !== "bounded-result-produced"
   || contract.automaticConnection?.connectedPredicate
     !== "value.connected=true-and-value.status=connected"
@@ -170,7 +183,45 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.ownership?.taskSpaces?.maximumParallelRequests !== 64
   || contract.ownership?.taskSpaces?.maximumConcurrency !== 16
   || contract.ownership?.taskSpaces?.highImpactApproval?.enforcement !== "optional-caller-policy"
+  || JSON.stringify(contract.taskRuntime?.helpers) !== JSON.stringify([
+    "beginTaskContext",
+    "probeTaskContext",
+    "scrollTaskTab",
+    "navigateSemanticRef",
+    "captureStableViewport",
+    "captureFullPage",
+    "inspectTaskBlocker",
+    "resolveTaskBlocker",
+    "completeTaskContext",
+  ])
+  || contract.taskRuntime?.humanInputPath !== "input.perform"
+  || contract.taskRuntime?.humanJavaScriptScroll !== false
+  || contract.taskRuntime?.initialPageHealthProbe !== "exact-window-and-single-tab-ownership-marker-before-task-binding"
+  || contract.taskRuntime?.fullPageCapture?.observationOnly !== true
+  || contract.taskRuntime?.fullPageCapture?.coordinateMapping !== false
+  || contract.taskRuntime?.screenshotRetry?.transientCode !== "STALE_VIEWPORT"
+  || contract.taskRuntime?.screenshotRetry?.otherErrorsRetried !== false
+  || contract.taskRuntime?.visualFallback?.mode !== "automatic-broad-page-anomaly"
+  || contract.taskRuntime?.visualFallback?.operation !== "inspectTaskBlocker"
+  || contract.taskRuntime?.visualFallback?.resolutionOperation !== "resolveTaskBlocker"
+  || contract.taskRuntime?.visualFallback?.maximumAutomaticCapturesPerTask !== 120
+  || contract.taskRuntime?.visualFallback?.actionReplay !== false
+  || !contract.taskRuntime?.visualFallback?.triggers?.includes("task-progress-silence")
+  || contract.taskRuntime?.progress?.event !== "moneyhand.task_progress"
+  || contract.taskRuntime?.progress?.automaticIntervalMs !== 10000
+  || contract.taskRuntime?.progress?.visualSilenceMs !== 15000
+  || contract.taskRuntime?.progress?.watchdogPollMaximumMs !== 250
+  || contract.taskRuntime?.progress?.streamsBeforeTaskCompletion !== true
+  || contract.taskRuntime?.progress?.screenshotOnSilence !== true
   || contract.transports?.taskModule?.flag !== "--task"
+  || contract.transports?.taskModule?.signature !== "run({ moneyhand, signal, args, progress })"
+  || contract.transports?.taskModule?.timeoutFlag !== "--task-timeout-ms"
+  || contract.transports?.taskModule?.defaultTimeoutMs !== 1800000
+  || contract.transports?.taskModule?.maximumTimeoutMs !== 86400000
+  || contract.transports?.taskModule?.progressEvent !== "moneyhand.task_progress"
+  || contract.transports?.taskModule?.automaticProgressIntervalMs !== 10000
+  || contract.transports?.taskModule?.automaticVisualSilenceMs !== 15000
+  || contract.transports?.builtInController?.publicStopFlag !== "--stop"
   || contract.transports?.directCall?.connectFlag !== "--connect"
   || contract.transports?.directCall?.stdinRequired !== false
   || contract.transports?.npm?.bin !== "moneyhand"

@@ -62,11 +62,26 @@ jobs:
         run: npm run check
       - name: Build and conformance-test release artifacts
         run: npm run release:pack
+      - name: Build and checksum-gate the portable Skill
+        shell: bash
+        run: |
+          npm run skill:pack:portable
+          cd artifacts/portable-skill
+          sha256sum --check SHA256SUMS.txt
       - name: Upload the complete unpacked release directory
         uses: actions/upload-artifact@v7
         with:
           name: npc-moneyhand-release
           path: artifacts/agent-release
+          if-no-files-found: error
+      - name: Upload the verified portable Skill assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: npc-moneyhand-portable-skill
+          path: |
+            artifacts/portable-skill/npc-moneyhand-portable-skill-*.zip
+            artifacts/portable-skill/portable-manifest.json
+            artifacts/portable-skill/SHA256SUMS.txt
           if-no-files-found: error
 
   supported-agent-conformance:
@@ -110,6 +125,11 @@ jobs:
         with:
           name: npc-moneyhand-release
           path: artifacts/agent-release
+      - name: Download verified portable Skill assets
+        uses: actions/download-artifact@v8
+        with:
+          name: npc-moneyhand-portable-skill
+          path: artifacts/portable-skill
       - name: Verify and publish immutable release assets
         shell: bash
         working-directory: artifacts/agent-release
@@ -119,10 +139,22 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           sha256sum --check SHA256SUMS.txt
+          portable_dir="../portable-skill"
+          (cd "$portable_dir" && sha256sum --check SHA256SUMS.txt)
+          version="${RELEASE_TAG#v}"
+          portable_zip="$portable_dir/npc-moneyhand-portable-skill-${version}.zip"
+          test -f "$portable_zip"
+          cp "$portable_dir/SHA256SUMS.txt" \
+            "$portable_dir/npc-moneyhand-portable-skill-SHA256SUMS.txt"
           assets=(release-manifest.json SHA256SUMS.txt)
           while IFS= read -r -d '' asset; do
             assets+=("$asset")
           done < <(find . -maxdepth 1 -type f \( -name '*.tgz' -o -name '*.zip' \) -print0 | sort -z)
+          assets+=(
+            "$portable_zip"
+            "$portable_dir/portable-manifest.json"
+            "$portable_dir/npc-moneyhand-portable-skill-SHA256SUMS.txt"
+          )
           flags=(--verify-tag --title "$RELEASE_TAG" --generate-notes)
           if [[ "$RELEASE_TAG" == *-* ]]; then
             flags+=(--prerelease)

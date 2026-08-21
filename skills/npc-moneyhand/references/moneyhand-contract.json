@@ -16,10 +16,10 @@
   "automaticConnection": {
     "command": "--connect",
     "resultSchema": "npc-moneyhand-connect/1",
-    "successNextAction": "ask_user_for_task",
+    "successNextAction": "ready_for_tasks",
     "userRetryFlag": "--after-user-action",
     "maximumUserConfirmedRetries": 1,
-    "runsBrowserOperation": false,
+    "runsBrowserOperation": true,
     "outerOkMeaning": "bounded-result-produced",
     "connectedPredicate": "value.connected=true-and-value.status=connected",
     "endpoint": "ws://127.0.0.1:19846/extension",
@@ -29,6 +29,33 @@
     "extensionFirstRunAutoEnabled": true,
     "popupAction": "immediate-reconnect",
     "fullPreflightRequired": false,
+    "automaticAcceptance": {
+      "schema": "npc-moneyhand-connect-acceptance/1",
+      "mandatoryOnNormalConnect": true,
+      "scope": "localhost-owned-task-window",
+      "externalWebsiteRequested": false,
+      "streamsProgress": true,
+      "closesTaskWindow": true,
+      "resetsBehaviorToRaw": true,
+      "removesDownloadArtifact": true,
+      "checks": [
+        "task_context_and_human_mode",
+        "localhost_navigation",
+        "semantic_snapshot",
+        "text_input",
+        "pointer_click",
+        "checkbox",
+        "select",
+        "upload",
+        "human_scroll",
+        "bounded_cdp_read",
+        "viewport_screenshot",
+        "full_page_screenshot",
+        "download",
+        "download_cleanup",
+        "task_window_and_behavior_cleanup"
+      ]
+    },
     "reusesLiveSession": true,
     "startsListener": true,
     "startsBrowserWhenNeeded": true,
@@ -509,6 +536,7 @@
     "callerPageJavaScript": false,
     "readinessProbe": "Page.getFrameTree-plus-fixed-document.readyState-batch",
     "eventDependency": false,
+    "defaultWaitUntil": "domcontentloaded",
     "defaultTimeoutMs": 30000,
     "maximumTimeoutMs": 300000,
     "timeoutMeaning": "document-readiness-budget-after-navigation-dispatch",
@@ -516,12 +544,100 @@
     "defaultPollIntervalMs": 100,
     "defaultStablePolls": 2,
     "maximumObservations": 512,
+    "transientReadRecovery": "retry-within-the-same-bounded-observation-budget",
     "sameProfileTabConcurrency": "fail-closed",
     "differentProfileOrTabConcurrency": true,
     "redirectPolicy": "observe-final-stable-frame-state; optional-fixed-url-match",
-    "commitClaim": "Page.navigate-command-acknowledged-only",
+    "commitClaim": "Page.navigate-or-owned-marker-tabs.update-command-acknowledged-only",
     "readyClaim": "document-readiness-only-not-business-success",
     "timeoutAfterNavigation": "action-dispatched-inspect-before-retry"
+  },
+  "taskRuntime": {
+    "helpers": [
+      "beginTaskContext",
+      "probeTaskContext",
+      "scrollTaskTab",
+      "navigateSemanticRef",
+      "captureStableViewport",
+      "captureFullPage",
+      "inspectTaskBlocker",
+      "resolveTaskBlocker",
+      "completeTaskContext"
+    ],
+    "targetSelection": "latest-focused-profile-once-then-dedicated-owned-window",
+    "taskWindow": {
+      "creation": "one-new-normal-window-with-unique-about-blank-fragment-marker",
+      "ownership": "controller-task-id-plus-window-id-plus-single-tab-marker",
+      "cleanup": "close-exact-owned-window-in-finally-never-existing-user-windows",
+      "changedWindow": "fail-closed-without-window-remove"
+    },
+    "initialPageHealthProbe": "exact-window-and-single-tab-ownership-marker-before-task-binding",
+    "firstNavigation": "owned-about-blank-marker-tabs.update-then-cdp-readiness",
+    "healthRecovery": "marker-ownership-before-first-navigation-then-bounded-cdp-probe",
+    "defaultBehavior": "raw",
+    "humanInputPath": "input.perform",
+    "humanJavaScriptScroll": false,
+    "semanticLinkNavigation": "fresh-ref-href-to-guarded-navigation",
+    "visualFallback": {
+      "mode": "automatic-broad-page-anomaly",
+      "operation": "inspectTaskBlocker",
+      "resolutionOperation": "resolveTaskBlocker",
+      "triggers": [
+        "needs-instruction",
+        "navigation-timeout-or-unknown",
+        "page-health-or-readiness-failure",
+        "semantic-missing-ambiguous-stale-or-occluded",
+        "browser-input-or-postcondition-failure",
+        "task-progress-silence",
+        "task-terminal-failure-timeout-or-incomplete",
+        "task-event-loop-recovery-after-silence",
+        "other-task-page-operation-failure"
+      ],
+      "excluded": [
+        "connection-not-established",
+        "no-pinned-task-page",
+        "artifact-filesystem-failure",
+        "rate-control-only-state"
+      ],
+      "image": "one-current-viewport-local-png-per-anomaly",
+      "maximumAutomaticCapturesPerTask": 120,
+      "returnsBoundedText": true,
+      "hidesWaitIdTabIdAndBase64": true,
+      "preservesInstructionWait": true,
+      "actionReplay": false
+    },
+    "progress": {
+      "event": "moneyhand.task_progress",
+      "schema": "npc-moneyhand-task-progress/1",
+      "attachedMonitorEvent": "moneyhand.task_monitor",
+      "attachedMonitorSchema": "npc-moneyhand-task-monitor/1",
+      "attachedMonitorIntervalMs": 10000,
+      "automaticIntervalMs": 10000,
+      "visualSilenceMs": 15000,
+      "watchdogPollMaximumMs": 250,
+      "thresholdsCanOnlyTighten": true,
+      "startsBeforeModuleImport": true,
+      "explicitCallback": "progress({phase,message,current,total,checkpoint})",
+      "streamsBeforeTaskCompletion": true,
+      "screenshotOnSilence": true,
+      "screenshotBeforeTaskTimeoutAbort": true,
+      "screenshotBeforeCleanupOnTerminalAnomaly": true,
+      "watchdogPausedAndDrainedBeforeTaskCleanup": true,
+      "screenshotActionReplay": false
+    },
+    "screenshotRetry": {
+      "operation": "captureStableViewport",
+      "transientCode": "STALE_VIEWPORT",
+      "defaultMaximumAttempts": 3,
+      "otherErrorsRetried": false
+    },
+    "fullPageCapture": {
+      "operation": "captureFullPage",
+      "observationOnly": true,
+      "coordinateMapping": false,
+      "maximumDecodedBytes": 4194304
+    },
+    "cleanup": "behavior-reset-owned-window-close-and-task-space-complete"
   },
   "siteLearnings": {
     "location": "agent-side-memory",
@@ -578,9 +694,24 @@
     "taskModule": {
       "flag": "--task",
       "requiredExport": "run",
-      "signature": "run({ moneyhand, signal, args })",
+      "signature": "run({ moneyhand, signal, args, progress })",
       "security": "trusted-local-code",
-      "resultId": "task"
+      "resultId": "task",
+      "timeoutFlag": "--task-timeout-ms",
+      "defaultTimeoutMs": 1800000,
+      "maximumTimeoutMs": 86400000,
+      "timeoutResultCode": "TASK_TIMEOUT",
+      "unacknowledgedAbort": "fail-closed-controller-exit",
+      "progressEvent": "moneyhand.task_progress",
+      "progressSchema": "npc-moneyhand-task-progress/1",
+      "attachedMonitorEvent": "moneyhand.task_monitor",
+      "attachedMonitorSchema": "npc-moneyhand-task-monitor/1",
+      "attachedMonitorIntervalMs": 10000,
+      "automaticProgressIntervalMs": 10000,
+      "automaticVisualSilenceMs": 15000,
+      "watchdogThresholdsCanOnlyTighten": true,
+      "monitoringStartsBeforeModuleImport": true,
+      "watchdogPausedAndDrainedBeforeTaskCleanup": true
     },
     "directCall": {
       "connectFlag": "--connect",
@@ -589,6 +720,38 @@
       "autoLaunchBrowser": true,
       "stdinRequired": false,
       "resultId": "call"
+    },
+    "builtInController": {
+      "protocol": "npc-moneyhand-controller/2",
+      "product": "npc-moneyhand",
+      "version": "1.0.0",
+      "endpoint": "127.0.0.1:19845",
+      "startup": "implicit-on-connect-call-or-task",
+      "installation": "bundled-in-the-skill-no-separate-software",
+      "reuse": "same-runtime-build-across-agent-install-paths-one-controller-process-serializes-local-commands",
+      "compatibilityFields": [
+        "protocol",
+        "product",
+        "version",
+        "build"
+      ],
+      "auditFields": [
+        "sourceId",
+        "pid",
+        "instanceNonce"
+      ],
+      "buildScope": "package-json-plus-scripts-recursive-mjs",
+      "privateRequestProof": "32-byte-random-token-from-user-private-state-never-status",
+      "stateSchema": "npc-moneyhand-controller-state/1",
+      "stateLocation": "os-temp-user-private-per-port",
+      "unknownOccupant": "fail-closed-without-stop-or-state-delete",
+      "staleUpgrade": "valid-owned-state-plus-two-port-refusals",
+      "halfOpenSocketShutdown": "destroy-accepted-sockets-before-server-close-wait",
+      "autoLaunchedBrowserCleanup": "close-unchanged-unique-bootstrap-tab-after-task",
+      "bootstrapCaptureRace": "retain-unique-provisional-marker-after-handshake-exact-cleanup-only",
+      "idleExitMs": 900000,
+      "publicStopFlag": "--stop",
+      "publicStopScope": "this-authenticated-controller-instance-only"
     }
   },
   "jsonlFieldSeparation": {
@@ -625,7 +788,16 @@
     "approveTaskEffect",
     "listApprovalActivity",
     "confirmUnknown",
-    "rateControl"
+    "rateControl",
+    "beginTaskContext",
+    "probeTaskContext",
+    "scrollTaskTab",
+    "navigateSemanticRef",
+    "captureStableViewport",
+    "captureFullPage",
+    "inspectTaskBlocker",
+    "resolveTaskBlocker",
+    "completeTaskContext"
   ],
   "highImpactApproval": {
     "enforcement": "optional-caller-policy",

@@ -347,7 +347,7 @@ export function normalizeSemanticRefAction(value) {
   if (typeof input.action !== "string" || !ACTION_SET.has(input.action)) {
     throw new SemanticActionError(
       "INVALID_SEMANTIC_ACTION",
-      `action must be one of: ${SEMANTIC_REF_ACTIONS.join(", ")}`,
+      `top-level action must be a string and one of: ${SEMANTIC_REF_ACTIONS.join(", ")}`,
     );
   }
   const output = { action: input.action };

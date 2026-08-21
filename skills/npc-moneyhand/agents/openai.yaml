@@ -1,4 +1,4 @@
 interface:
   display_name: "NPC MoneyHand"
-  short_description: "Connect MoneyHand through one fixed startup flow"
-  default_prompt: "Use $npc-moneyhand. Follow only its bounded connection result. When connected, stop and ask me what browser task to perform; do not browse or test anything first."
+  short_description: "Connect and verify MoneyHand through one fixed flow"
+  default_prompt: "Use $npc-moneyhand to install or import it if needed, immediately run its fixed connection and automatic acceptance in the same turn without offering them as optional, then follow the bounded result."

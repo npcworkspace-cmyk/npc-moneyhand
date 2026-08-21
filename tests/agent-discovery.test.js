@@ -87,15 +87,33 @@ function assertDescriptor(descriptor, contract, catalog) {
   assert.deepEqual(descriptor.contract, contract);
   assert.deepEqual(descriptor.capabilities.agentInterop, contract.agentInterop);
   assert.deepEqual(
+    descriptor.capabilities.transports.taskModule,
+    contract.transports.taskModule,
+  );
+  assert.deepEqual(
+    descriptor.capabilities.transports.directCall,
+    contract.transports.directCall,
+  );
+  assert.deepEqual(
+    descriptor.capabilities.transports.builtInController,
+    contract.transports.builtInController,
+  );
+  assert.deepEqual(
     descriptor.capabilities.automaticConnection,
     contract.automaticConnection,
   );
   assert.equal(contract.automaticConnection.command, "--connect");
   assert.equal(contract.automaticConnection.resultSchema, "npc-moneyhand-connect/1");
-  assert.equal(contract.automaticConnection.successNextAction, "ask_user_for_task");
+  assert.equal(contract.automaticConnection.successNextAction, "ready_for_tasks");
   assert.equal(contract.automaticConnection.userRetryFlag, "--after-user-action");
   assert.equal(contract.automaticConnection.maximumUserConfirmedRetries, 1);
-  assert.equal(contract.automaticConnection.runsBrowserOperation, false);
+  assert.equal(contract.automaticConnection.runsBrowserOperation, true);
+  assert.equal(contract.automaticConnection.automaticAcceptance.mandatoryOnNormalConnect, true);
+  assert.equal(contract.automaticConnection.automaticAcceptance.scope, "localhost-owned-task-window");
+  assert.equal(contract.automaticConnection.automaticAcceptance.checks.length, 15);
+  assert.equal(contract.automaticConnection.automaticAcceptance.closesTaskWindow, true);
+  assert.equal(contract.automaticConnection.automaticAcceptance.resetsBehaviorToRaw, true);
+  assert.equal(contract.automaticConnection.automaticAcceptance.removesDownloadArtifact, true);
   assert.equal(contract.automaticConnection.outerOkMeaning, "bounded-result-produced");
   assert.equal(
     contract.automaticConnection.connectedPredicate,

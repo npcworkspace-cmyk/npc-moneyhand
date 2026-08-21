@@ -38,6 +38,7 @@ const OBSERVATION_KEYS = new Set([
 const CHECKPOINT_KEYS = new Set(["scope", "token"]);
 const SNAPSHOT_KEYS = new Set(["scope"]);
 const RESET_KEYS = new Set(["scope"]);
+const WAIT_OPTION_KEYS = new Set(["signal"]);
 const BEHAVIOR_MODES = new Set(["raw", "human"]);
 
 export const RATE_CONTROL_DEFAULTS = Object.freeze({
@@ -255,8 +256,71 @@ function normalizeOptions(value) {
   };
 }
 
-function defaultSleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function defaultSleep(milliseconds, signal) {
+  if (signal?.aborted) return Promise.reject(rateControlAbortError());
+  return new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timer);
+      cleanup();
+      rejectPromise(rateControlAbortError());
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+function optionalAbortSignal(value) {
+  if (value === undefined) return undefined;
+  if (!value
+    || typeof value !== "object"
+    || typeof value.aborted !== "boolean"
+    || typeof value.addEventListener !== "function"
+    || typeof value.removeEventListener !== "function") {
+    throw new RateControlError(
+      "INVALID_RATE_CONTROL_INPUT",
+      "wait options.signal must be an AbortSignal",
+    );
+  }
+  return value;
+}
+
+function rateControlAbortError() {
+  return new RateControlError(
+    "ABORTED",
+    "Rate-control wait was aborted before work was dispatched",
+    { actionDispatched: false, retry: "safe-to-recheck" },
+  );
+}
+
+async function cancellableSleep(sleep, milliseconds, signal) {
+  if (signal?.aborted) throw rateControlAbortError();
+  if (!signal) return await sleep(milliseconds);
+  return await new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      callback(value);
+    };
+    const abort = () => settle(rejectPromise, rateControlAbortError());
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    Promise.resolve()
+      .then(() => (settled ? undefined : sleep(milliseconds, signal)))
+      .then(
+        (value) => settle(resolvePromise, value),
+        (error) => settle(rejectPromise, error),
+      );
+  });
 }
 
 function normalizeHeaders(value) {
@@ -726,7 +790,10 @@ export class AdaptiveRateController {
     return publicState(state);
   }
 
-  async wait(value) {
+  async wait(value, options = {}) {
+    const waitOptions = exactKeys(object(options, "wait options"), WAIT_OPTION_KEYS, "wait option");
+    const signal = optionalAbortSignal(waitOptions.signal);
+    if (signal?.aborted) throw rateControlAbortError();
     const input = exactKeys(object(value, "wait"), PLAN_KEYS, "wait");
     const first = this.plan(input);
     if (first.stop) {
@@ -735,7 +802,8 @@ export class AdaptiveRateController {
         `Rate-control circuit is open: ${first.reason}`,
       );
     }
-    if (first.waitMs > 0) await this.sleep(first.waitMs);
+    if (first.waitMs > 0) await cancellableSleep(this.sleep, first.waitMs, signal);
+    if (signal?.aborted) throw rateControlAbortError();
     return this.plan(input);
   }
 

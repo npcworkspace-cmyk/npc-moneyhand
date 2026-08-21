@@ -112,10 +112,429 @@ test("CLI --task runs a complete disposable module through one MoneyHand lifecyc
   assert.equal(result.ok, true);
   assert.deepEqual(result.value.args, { source: "cli" });
   assert.equal(result.value.terminal.result.targets[0].tabId, 42);
+  const progress = messages.filter((message) => message.event === "moneyhand.task_progress");
+  assert.equal(progress[0].state, "started");
+  assert.equal(progress.at(-1).state, "completed");
+  assert.equal(messages.indexOf(progress[0]) < messages.indexOf(result), true);
   assert.equal(messages.at(-1).event, "moneyhand.stopped");
 });
 
-test("CLI --connect returns one bounded connected result without probing tabs", async (t) => {
+async function runCli(argumentsList, timeoutMs = 5_000) {
+  const child = spawn(process.execPath, [moneyhandPath, ...argumentsList], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const outcome = await waitForClose(child, timeoutMs);
+  if (outcome[0] === "timeout") child.kill();
+  return {
+    code: outcome[0],
+    stderr,
+    messages: stdout.trim()
+      ? stdout.trim().split(/\r?\n/u).map((line) => JSON.parse(line))
+      : [],
+  };
+}
+
+test("CLI --ensure is idempotent under concurrent startup", async (t) => {
+  const controllerPort = await unusedPort();
+  const extensionPort = await unusedPort();
+  t.after(() => runCli([
+    "--internal-stop-controller",
+    "--internal-controller-port",
+    String(controllerPort),
+  ]));
+
+  const results = await Promise.all(Array.from({ length: 4 }, () => runCli([
+    "--ensure",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--internal-controller-idle-ms",
+    "60000",
+    "--no-browser-launch",
+  ])));
+
+  for (const result of results) {
+    assert.equal(result.code, 0, result.stderr);
+    const envelope = result.messages.find((message) => message.id === "ensure");
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.value.status, "running");
+    assert.equal(envelope.value.host, "127.0.0.1");
+    assert.equal(envelope.value.port, controllerPort);
+    assert.equal(envelope.value.protocol, "npc-moneyhand-controller/2");
+    assert.equal(envelope.value.product, "npc-moneyhand");
+    assert.equal(envelope.value.version, "1.0.0");
+    assert.match(envelope.value.build, /^[a-f0-9]{64}$/u);
+    assert.match(envelope.value.sourceId, /^[a-f0-9]{64}$/u);
+    assert.match(envelope.value.instanceNonce, /^[a-f0-9-]{36}$/u);
+    assert.equal(Object.hasOwn(envelope.value, "token"), false);
+  }
+  assert.equal(new Set(results.map((result) => (
+    result.messages.find((message) => message.id === "ensure").value.pid
+  ))).size, 1);
+  assert.equal(new Set(results.map((result) => (
+    result.messages.find((message) => message.id === "ensure").value.instanceNonce
+  ))).size, 1);
+});
+
+test("CLI ensure and stop fail closed around an unknown localhost listener", async (t) => {
+  const controllerPort = await unusedPort();
+  const occupant = createServer(() => {});
+  await new Promise((resolvePromise, reject) => {
+    occupant.once("error", reject);
+    occupant.listen(controllerPort, "127.0.0.1", resolvePromise);
+  });
+  t.after(() => new Promise((resolvePromise) => occupant.close(resolvePromise)));
+
+  const ensured = await runCli([
+    "--ensure",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-controller-idle-ms",
+    "60000",
+    "--no-browser-launch",
+  ]);
+  assert.equal(ensured.code, 1);
+  assert.equal(
+    ensured.messages.find((message) => message.type === "fatal").error.code,
+    "CONTROLLER_PORT_OCCUPIED",
+  );
+  assert.equal(occupant.listening, true);
+
+  const stopped = await runCli([
+    "--stop",
+    "--internal-controller-port",
+    String(controllerPort),
+  ]);
+  assert.equal(stopped.code, 0, stopped.stderr);
+  assert.deepEqual(
+    stopped.messages.find((message) => message.id === "shutdown").value,
+    { stopped: false },
+  );
+  assert.equal(occupant.listening, true);
+});
+
+test("CLI --stop closes only the selected resident controller", async (t) => {
+  const firstPort = await unusedPort();
+  const secondPort = await unusedPort();
+  t.after(() => Promise.all([firstPort, secondPort].map((port) => runCli([
+    "--stop",
+    "--internal-controller-port",
+    String(port),
+  ]))));
+  const first = await runCli([
+    "--ensure", "--internal-controller-port", String(firstPort),
+    "--internal-controller-idle-ms", "60000", "--no-browser-launch",
+  ]);
+  const second = await runCli([
+    "--ensure", "--internal-controller-port", String(secondPort),
+    "--internal-controller-idle-ms", "60000", "--no-browser-launch",
+  ]);
+  const firstPid = first.messages.find((message) => message.id === "ensure").value.pid;
+  const secondPid = second.messages.find((message) => message.id === "ensure").value.pid;
+  assert.notEqual(firstPid, secondPid);
+
+  const stopped = await runCli([
+    "--stop", "--internal-controller-port", String(firstPort),
+  ]);
+  assert.equal(stopped.code, 0, stopped.stderr);
+  assert.deepEqual(
+    stopped.messages.find((message) => message.id === "shutdown").value,
+    { stopped: true },
+  );
+  const secondStillRunning = await runCli([
+    "--ensure", "--internal-controller-port", String(secondPort),
+    "--internal-controller-idle-ms", "60000", "--no-browser-launch",
+  ]);
+  const status = secondStillRunning.messages.find((message) => message.id === "ensure").value;
+  assert.equal(status.pid, secondPid);
+  assert.equal(status.reused, true);
+});
+
+test("CLI resident controller keeps the extension connection across connect and task", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-resident-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, [
+    "export async function run({ moneyhand, progress }) {",
+    "  await progress({ phase: 'collect', current: 0, total: 1, message: 'Preparing one request' });",
+    "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10500);",
+    "  return await moneyhand.request({ method: 'target.list', params: {} });",
+    "}",
+  ].join("\n"), "utf8");
+  const controllerPort = await unusedPort();
+  const extensionPort = await unusedPort();
+  t.after(() => runCli([
+    "--internal-stop-controller",
+    "--internal-controller-port",
+    String(controllerPort),
+  ]));
+  const connectChild = spawn(process.execPath, [
+    moneyhandPath,
+    "--connect",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--connect-timeout-ms",
+    "3000",
+    "--internal-controller-idle-ms",
+    "60000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const connectMessages = [];
+  createInterface({ input: connectChild.stdout, crlfDelay: Infinity })
+    .on("line", (line) => connectMessages.push(JSON.parse(line)));
+  const opened = await openWebSocketEventually(extensionPort);
+  t.after(() => opened.client.destroy());
+  opened.client.sendJson({
+    v: 2,
+    type: "hello",
+    protocol: "npc-moneyhand/2",
+    product: "npc-moneyhand",
+    profile: "npc-resident-cli",
+    instanceId: "instance_resident_cli",
+    bootId: "boot_resident_cli",
+    version: "1.0.0",
+    auth: { mode: "none" },
+    focus: { windowId: 3, focused: true, lastFocusedAt: 3 },
+    browser: { platform: { os: "test" } },
+    unknownOutcomeIds: [],
+    capabilities: { coordinateContract: "css-viewport-v1" },
+  });
+  assert.equal((await opened.client.nextJson()).type, "ready");
+  const ping = await opened.client.nextJson();
+  assert.equal(ping.type, "ping");
+  opened.client.sendJson({ v: 2, type: "pong", timestamp: ping.timestamp });
+  assert.equal((await waitForClose(connectChild, 5_000))[0], 0);
+  assert.equal(connectMessages.find((message) => message.id === "connect").ok, true);
+
+  const taskChild = spawn(process.execPath, [
+    moneyhandPath,
+    "--task",
+    taskPath,
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--connect-timeout-ms",
+    "3000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const taskMessages = [];
+  const taskLines = createInterface({ input: taskChild.stdout, crlfDelay: Infinity });
+  const attachedMonitorSeen = new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for attached client monitor")), 13_000);
+    taskLines.on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.event === "moneyhand.task_monitor") {
+        clearTimeout(timer);
+        resolvePromise(message);
+      }
+    });
+  });
+  const progressSeen = new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for streamed task progress")), 2_000);
+    taskLines.on("line", (line) => {
+      const message = JSON.parse(line);
+      taskMessages.push(message);
+      if (message.event === "moneyhand.task_progress"
+        && message.phase === "collect"
+        && message.current === 0) {
+        clearTimeout(timer);
+        resolvePromise(message);
+      }
+    });
+  });
+  const streamedProgress = await progressSeen;
+  assert.equal(streamedProgress.state, "running");
+  assert.equal(taskChild.exitCode, null, "progress was buffered until task completion");
+  const attachedMonitor = await attachedMonitorSeen;
+  assert.equal(attachedMonitor.schema, "npc-moneyhand-task-monitor/1");
+  assert.equal(attachedMonitor.phase, "attached-client");
+  assert.equal(attachedMonitor.silenceMs >= 10_000, true);
+  assert.equal(taskChild.exitCode, null, "attached monitor was buffered until controller recovery");
+  while (true) {
+    const request = await opened.client.nextJson();
+    if (request.type === "ping") {
+      opened.client.sendJson({ v: 2, type: "pong", timestamp: request.timestamp });
+      continue;
+    }
+    assert.equal(request.method, "target.list");
+    opened.client.sendJson({
+      v: 2,
+      type: "response",
+      id: request.id,
+      ok: true,
+      result: { targets: [{ tabId: 77 }] },
+    });
+    break;
+  }
+  assert.equal((await waitForClose(taskChild, 5_000))[0], 0);
+  assert.equal(taskMessages.find((message) => message.id === "task").value.result.targets[0].tabId, 77);
+  assert.equal(taskMessages.filter((message) => message.event === "moneyhand.task_progress").at(-1).state, "completed");
+  assert.equal(taskMessages.some((message) => message.error?.code === "EADDRINUSE"), false);
+
+  const callChild = spawn(process.execPath, [
+    moneyhandPath,
+    "--call",
+    "target.list",
+    "--params-json",
+    "{}",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--connect-timeout-ms",
+    "3000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let callStdout = "";
+  callChild.stdout.setEncoding("utf8");
+  callChild.stdout.on("data", (chunk) => { callStdout += chunk; });
+  while (true) {
+    const request = await opened.client.nextJson();
+    if (request.type === "ping") {
+      opened.client.sendJson({ v: 2, type: "pong", timestamp: request.timestamp });
+      continue;
+    }
+    assert.equal(request.method, "target.list");
+    opened.client.sendJson({
+      v: 2,
+      type: "response",
+      id: request.id,
+      ok: true,
+      result: { targets: [{ tabId: 88 }] },
+    });
+    break;
+  }
+  assert.equal((await waitForClose(callChild, 5_000))[0], 0);
+  const callMessages = callStdout.trim().split(/\r?\n/u).map((line) => JSON.parse(line));
+  assert.equal(callMessages.find((message) => message.id === "call").value.result.targets[0].tabId, 88);
+  assert.equal(callMessages.some((message) => message.error?.code === "EADDRINUSE"), false);
+});
+
+test("CLI exits nonzero when a task result is ok false", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-failing-task-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, "export async function run() { throw new Error('task exploded'); }\n", "utf8");
+  const child = spawn(process.execPath, [
+    moneyhandPath,
+    "--task",
+    taskPath,
+    "--internal-test-port",
+    "0",
+    "--connect-timeout-ms",
+    "3000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+  });
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const messages = [];
+  lines.on("line", (line) => messages.push(JSON.parse(line)));
+  const [firstLine] = await once(lines, "line");
+  const endpoint = new URL(JSON.parse(firstLine).endpoint);
+  const opened = await openRawWebSocket({
+    host: endpoint.hostname,
+    port: Number(endpoint.port),
+    path: endpoint.pathname,
+  });
+  opened.client.sendJson({
+    v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
+    profile: "npc-failure-cli", instanceId: "instance_failure_cli", bootId: "boot_failure_cli",
+    version: "1.0.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
+  });
+  await opened.client.nextJson();
+  const ping = await opened.client.nextJson();
+  opened.client.sendJson({ v: 2, type: "pong", timestamp: ping.timestamp });
+  assert.equal((await waitForClose(child, 5_000))[0], 1);
+  const result = messages.find((message) => message.id === "task");
+  assert.equal(result.ok, false);
+  assert.equal(result.error.message, "task exploded");
+  opened.client.destroy();
+});
+
+test("CLI --task emits one bounded TASK_TIMEOUT when a module ignores abort", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-timeout-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, "export async function run() { await new Promise(() => {}); }\n", "utf8");
+  const child = spawn(process.execPath, [
+    moneyhandPath,
+    "--task", taskPath,
+    "--task-timeout-ms", "20",
+    "--internal-task-abort-grace-ms", "20",
+    "--internal-test-port", "0",
+    "--connect-timeout-ms", "3000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+  });
+  const messages = [];
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  lines.on("line", (line) => messages.push(JSON.parse(line)));
+  const [firstLine] = await once(lines, "line");
+  const endpoint = new URL(JSON.parse(firstLine).endpoint);
+  const opened = await openRawWebSocket({
+    host: endpoint.hostname,
+    port: Number(endpoint.port),
+    path: endpoint.pathname,
+  });
+  opened.client.sendJson({
+    v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
+    profile: "npc-timeout-cli", instanceId: "instance_timeout_cli", bootId: "boot_timeout_cli",
+    version: "1.0.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
+  });
+  await opened.client.nextJson();
+  const ping = await opened.client.nextJson();
+  opened.client.sendJson({ v: 2, type: "pong", timestamp: ping.timestamp });
+
+  assert.equal((await waitForClose(child, 5_000))[0], 1);
+  const results = messages.filter((message) => message.id === "task");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].ok, false);
+  assert.equal(results[0].error.code, "TASK_TIMEOUT");
+  assert.equal(results[0].error.details.taskAcknowledgedAbort, false);
+  assert.equal(results[0].error.details.controllerReusable, false);
+  assert.equal(messages.at(-1).event, "moneyhand.stopped");
+  opened.client.destroy();
+});
+
+test("CLI --connect returns one bounded ready result on its isolated test port", async (t) => {
   const port = await unusedPort();
   const child = spawn(process.execPath, [
     moneyhandPath,
@@ -165,7 +584,9 @@ test("CLI --connect returns one bounded connected result without probing tabs", 
   assert.equal(result.value.schema, "npc-moneyhand-connect/1");
   assert.equal(result.value.status, "connected");
   assert.equal(result.value.connected, true);
-  assert.equal(result.value.nextAction, "ask_user_for_task");
+  assert.equal(result.value.nextAction, "ready_for_tasks");
+  assert.equal(result.value.acceptance.status, "not_run");
+  assert.equal(result.value.acceptance.reason, "isolated-test-port");
   assert.equal(messages.some((message) => message.event === "moneyhand.listening"), false);
   assert.equal(messages.some((message) => message.event === "moneyhand.connected"), false);
   assert.doesNotMatch(JSON.stringify(messages), /tabId|instance_connect_cli|boot_connect_cli/u);

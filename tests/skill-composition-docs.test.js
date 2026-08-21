@@ -17,10 +17,13 @@ async function sources() {
 
 test("specialized Skill composition keeps one-way ownership and an explicit creation boundary", async () => {
   const { skill, composition } = await sources();
+  const startup = skill.split("## Run the user's task")[0];
 
   assert.match(skill, /A specialized Skill may depend on `npc-moneyhand`/u);
   assert.match(skill, /The specialized\s+Skill owns its platform or business workflow/u);
-  assert.doesNotMatch(skill, /references\/skill-composition\.md|agent-operations\.json/u);
+  assert.doesNotMatch(startup, /references\/skill-composition\.md|agent-operations\.json/u);
+  assert.match(skill, /Read `references\/skill-composition\.md`/u);
+  assert.match(skill, /copy `assets\/specialized-task\.mjs`/u);
   assert.match(composition, /Keep the dependency one-way/u);
   assert.match(composition, /MoneyHand and its\s+extension must never import, discover, or depend/u);
   for (const heading of [
@@ -62,7 +65,7 @@ test("specialized Skill boundaries prohibit duplicated control, credential expor
 
   for (const rule of [
     /must not:\s*[\s\S]*copy or fork the MoneyHand peer/u,
-    /start a second listener, daemon, browser, remote-debugging endpoint/u,
+    /start a second listener, controller process, browser runtime, or remote-debugging endpoint/u,
     /bypass unknown-outcome recovery, browser-session identity/u,
     /human behavior as permission to evade CAPTCHA/u,
     /export cookies, authorization headers, passwords, session tokens/u,
@@ -85,7 +88,8 @@ test("specialized Skill acceptance covers lifecycle, rate, direct dispatch, exac
     "rate plan before dispatch and observe afterward",
     "High-impact effects dispatch without a mandatory MoneyHand approval token",
     "Exact-scope mismatch fails before browser dispatch",
-    "zero automatic retries or destructive cleanup",
+    "zero automatic action retries",
+    "closes only its exact task-owned window",
     "A separate real-Profile acceptance",
     "no copied peer, extension, secrets, live checkpoints, or undeclared dependency",
   ]) {

@@ -29,6 +29,18 @@ git push -u origin feat/short-name
 - `PATCH`：兼容修复。
 - 预发布使用 `X.Y.Z-alpha.N`，同步更新 package、manifest `version_name` 和 changelog。
 
+打 tag 前本地生成两类交付物，确认它们来自当前工作树：
+
+```powershell
+npm run check
+npm run release:pack
+npm run skill:pack:portable
+```
+
+tag workflow 会重新构建并校验 release package 与 portable Skill 的 manifest/checksum；只有
+Linux 构建和 Windows/macOS packaged conformance 都通过后才发布。`artifacts/` 是本地忽略目录，
+不要把历史截图、抓取结果或旧验证包提交进 Git。
+
 ## 回滚
 
 发布历史使用 `git revert`，不重写 `main`：
@@ -42,7 +54,5 @@ git revert <commit>
 ```powershell
 git worktree add ..\npc-moneyhand-old <tag-or-commit>
 ```
-
-当前 1.x 安全硬化工作另存于本地 named stash。应用前先在独立分支确认内容；不要在脏工作树上直接 pop。
 
 Git 提交身份必须由仓库所有者配置。开发代理不会猜测 user.name 或 user.email。

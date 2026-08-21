@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_PAGE_WAIT_UNTIL,
   MAX_PAGE_WAIT_OBSERVATIONS,
   PageTransitionError,
   normalizeTaskPageNavigation,
@@ -42,6 +43,14 @@ test("task page navigation normalizes one bounded HTTP transaction", () => {
     url: "about:blank",
     waitUntil: "commit",
   }).url, "about:blank");
+  assert.equal(DEFAULT_PAGE_WAIT_UNTIL, "domcontentloaded");
+  assert.equal(normalizeTaskPageNavigation({
+    tabId: 7,
+    url: "https://example.test",
+  }).waitUntil, DEFAULT_PAGE_WAIT_UNTIL);
+  assert.equal(normalizeTaskPageWait({
+    tabId: 7,
+  }).waitUntil, DEFAULT_PAGE_WAIT_UNTIL);
 });
 
 test("task page navigation rejects executable, credentialed and unbounded intents", () => {
@@ -96,6 +105,7 @@ test("page readiness requires a real transition and stable browser-owned frame i
   const wait = normalizeTaskPageNavigation({
     tabId: 42,
     url: "https://example.test/next",
+    waitUntil: "load",
     expectedUrl: "https://example.test/next",
   });
   const transition = {
@@ -129,6 +139,42 @@ test("page readiness requires a real transition and stable browser-owned frame i
   assert.equal(taskPageStateMatches(complete, wait, transition), true);
   assert.equal(taskPageStateStabilityKey(complete), JSON.stringify(complete));
   assert.equal(taskPageStateMatches({ ...complete, frameId: "replacement" }, wait, transition), false);
+});
+
+test("default readiness accepts interactive DOM while load remains an explicit stricter wait", () => {
+  const base = {
+    tabId: 42,
+    url: "https://example.test/next",
+    expectedUrl: "https://example.test/next",
+  };
+  const before = {
+    frameId: "root",
+    loaderId: "loader-before",
+    url: "https://example.test/start",
+    readyState: "complete",
+  };
+  const transition = {
+    frameId: "root",
+    requestedUrl: base.url,
+    before,
+  };
+  const interactive = {
+    frameId: "root",
+    loaderId: "loader-next",
+    url: base.url,
+    readyState: "interactive",
+  };
+
+  assert.equal(taskPageStateMatches(
+    interactive,
+    normalizeTaskPageNavigation(base),
+    transition,
+  ), true);
+  assert.equal(taskPageStateMatches(
+    interactive,
+    normalizeTaskPageNavigation({ ...base, waitUntil: "load" }),
+    transition,
+  ), false);
 });
 
 test("same-document navigation requires URL movement while same-URL reload requires a new loader", () => {

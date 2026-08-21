@@ -4,12 +4,25 @@ import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter, once, setMaxListeners } from "node:events";
 import { realpathSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { arch as osArch, platform as osPlatform } from "node:os";
+import { arch as osArch, platform as osPlatform, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { Transform } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { normalizeAgentJsonlCommandEnvelope } from "./lib/agent-descriptor.mjs";
 import { ensureMoneyHandConnection } from "./lib/browser-launch.mjs";
+import {
+  CONTROLLER_SERVICE_PRODUCT,
+  CONTROLLER_SERVICE_PROTOCOL,
+  CONTROLLER_SERVICE_VERSION,
+  DEFAULT_CONTROLLER_HOST,
+  DEFAULT_CONTROLLER_IDLE_MS,
+  DEFAULT_CONTROLLER_PORT,
+  ensureControllerService,
+  pingControllerService,
+  requestControllerService,
+  shutdownControllerService,
+  startControllerService,
+} from "./lib/controller-service.mjs";
 import {
   MoneyHandUnknownOutcomeError,
   createMoneyHandPeer,
@@ -30,6 +43,7 @@ import {
   buildSemanticSnapshot,
 } from "./lib/semantic-snapshot.mjs";
 import {
+  DEFAULT_PAGE_WAIT_UNTIL,
   MAX_PAGE_WAIT_OBSERVATIONS,
   MAX_PAGE_WAIT_TIMEOUT_MS,
   PAGE_URL_MATCH_MODES,
@@ -82,6 +96,9 @@ export const DEFAULT_ONCE_TIMEOUT_MS = 120_000;
 export const MAX_JSONL_LINE_BYTES = 1024 * 1024;
 export const MAX_JSONL_INFLIGHT = 256;
 export const MONEYHAND_CONNECT_RESULT_SCHEMA = "npc-moneyhand-connect/1";
+const CONNECT_ACCEPTANCE_TASK_PATH = resolve(dirname(SOURCE_PATH), "..", "assets", "connect-acceptance.mjs");
+const CONNECT_READY_NEXT_ACTION = "ready_for_tasks";
+const CONNECT_ACCEPTANCE_TIMEOUT_MS = 90_000;
 export {
   AdaptiveRateController,
   RATE_CONTROL_DEFAULTS,
@@ -103,10 +120,89 @@ const MAX_SEMANTIC_FRAME_DEPTH = 128;
 const SEMANTIC_FRAME_DISCOVERY_POLL_MS = 25;
 const SEMANTIC_FRAME_DISCOVERY_TIMEOUT_MS = 250;
 const SEMANTIC_FRAME_DISCOVERY_STABLE_POLLS = 2;
+const TASK_WINDOW_READY_POLL_MS = 100;
+const TASK_WINDOW_READY_ATTEMPTS = 30;
+const TASK_INTERNAL_BEHAVIOR = Object.freeze({ onUnclear: "error" });
+export const DEFAULT_TASK_TIMEOUT_MS = 30 * 60_000;
+export const MAX_TASK_TIMEOUT_MS = 24 * 60 * 60_000;
+export const DEFAULT_TASK_PROGRESS_INTERVAL_MS = 10_000;
+export const DEFAULT_TASK_VISUAL_SILENCE_MS = 15_000;
+export const MAX_TASK_WATCHDOG_POLL_MS = 250;
+export const ATTACHED_TASK_MONITOR_INTERVAL_MS = 10_000;
+const DEFAULT_TASK_ABORT_GRACE_MS = 30_000;
+const MAX_TASK_ABORT_GRACE_MS = 120_000;
+const MAX_TASK_PROGRESS_INTERVAL_MS = 60_000;
+const MAX_TASK_VISUAL_SILENCE_MS = 5 * 60_000;
 const MAX_PARALLEL_TASK_REQUESTS = 64;
 const MAX_TASK_REQUEST_CONCURRENCY = 16;
+const MAX_AUTOMATIC_VISUAL_FALLBACKS = 120;
+const TASK_CONCURRENT_VISUAL_OBSERVATION = Symbol("task-concurrent-visual-observation");
+const TASK_AUTO_VISUAL_METHODS = new Set([
+  "probeTaskContext",
+  "scrollTaskTab",
+  "waitForTaskPage",
+  "navigateTaskTab",
+  "navigateSemanticRef",
+  "captureViewportBundle",
+  "captureSemanticSnapshot",
+  "waitForSemanticLocator",
+  "resolveSemanticRef",
+  "actSemanticRef",
+  "actSemanticLocator",
+  "captureStableViewport",
+  "captureFullPage",
+  "taskRequest",
+  "parallelTaskRequests",
+  "request",
+  "execute",
+]);
+const TASK_VISUAL_SKIP_CODES = new Set([
+  "ABORTED",
+  "TASK_TIMEOUT",
+  "NOT_RUNNING",
+  "NOT_CONNECTED",
+  "CONNECTION_LOST",
+  "SESSION_REPLACED",
+  "CONTROLLER_ABORTED",
+  "CONTROLLER_CLIENT_CLOSED",
+  "CONTROLLER_SHUTDOWN",
+  "CONTROLLER_STOPPING",
+  "TASK_PROGRESS_OUTPUT_FAILED",
+  "PAGE_TRANSITION_BUSY",
+  "INVALID_OUTPUT_PATH",
+  "INVALID_OUTPUT_ROOT",
+  "OUTPUT_OUTSIDE_ROOT",
+  "OUTPUT_EXISTS",
+  "SCREENSHOT_WRITE_FAILED",
+]);
+const TASK_SIGNAL_FIRST_ARGUMENT_METHODS = new Set([
+  "beginTaskContext",
+  "probeTaskContext",
+  "scrollTaskTab",
+  "waitForTaskPage",
+  "navigateTaskTab",
+  "navigateSemanticRef",
+  "captureViewportBundle",
+  "captureSemanticSnapshot",
+  "waitForSemanticLocator",
+  "resolveSemanticRef",
+  "actSemanticRef",
+  "actSemanticLocator",
+  "captureStableViewport",
+  "captureFullPage",
+  "inspectTaskBlocker",
+  "resolveTaskBlocker",
+  "taskRequest",
+  "parallelTaskRequests",
+  "confirmUnknown",
+  "createTaskSpace",
+  "rateControl",
+  "execute",
+  "wait",
+]);
 const OUTPUT_WORKER_FLAG = "--internal-output-worker";
 const OUTPUT_WORKER_ENV = "NPC_MONEYHAND_INTERNAL_OUTPUT_WORKER";
+const CONTROLLER_SERVICE_FLAG = "--internal-controller-service";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const SEMANTIC_COORDINATE_ACTIONS = new Set([
   "click",
@@ -131,7 +227,28 @@ const RATE_CONTROL_ACTIONS = Object.freeze([
 const SEMANTIC_DOWNLOAD_BASELINE_WINDOW_MS = 5_000;
 const SEMANTIC_DOWNLOAD_SEARCH_LIMIT = 256;
 const SEMANTIC_DOWNLOAD_STATES = new Set(["in_progress", "interrupted", "complete"]);
-const PROGRAMMATIC_OPERATIONS = Object.freeze([
+const TASK_BEHAVIOR_OPTION_FIELDS = new Set([
+  "beforeMs",
+  "afterMs",
+  "betweenStepsMs",
+  "typingDelayMs",
+  "pointerSteps",
+  "pointerDurationMs",
+  "onUnclear",
+  "ttlMs",
+]);
+const TASK_MODULE_HELPERS = Object.freeze([
+  "beginTaskContext",
+  "probeTaskContext",
+  "scrollTaskTab",
+  "navigateSemanticRef",
+  "captureStableViewport",
+  "captureFullPage",
+  "inspectTaskBlocker",
+  "resolveTaskBlocker",
+  "completeTaskContext",
+]);
+const JSONL_PRODUCT_OPERATIONS = Object.freeze([
   "capabilities",
   "status",
   "wait",
@@ -162,9 +279,13 @@ const PROGRAMMATIC_OPERATIONS = Object.freeze([
   "confirmUnknown",
   "rateControl",
 ]);
+const PROGRAMMATIC_OPERATIONS = Object.freeze([
+  ...JSONL_PRODUCT_OPERATIONS,
+  ...TASK_MODULE_HELPERS,
+]);
 const JSONL_CONTROL_OPERATIONS = Object.freeze(["cancel", "drain", "shutdown"]);
 const JSONL_OPERATIONS = Object.freeze([
-  ...PROGRAMMATIC_OPERATIONS,
+  ...JSONL_PRODUCT_OPERATIONS,
   ...JSONL_CONTROL_OPERATIONS,
 ]);
 
@@ -313,6 +434,135 @@ function requiredTaskSpaceId(value) {
   return value;
 }
 
+function taskBehaviorPlan(input) {
+  const mode = input.behavior ?? "raw";
+  if (mode !== "raw" && mode !== "human") {
+    throw new MoneyHandError(
+      "INVALID_TASK_BEHAVIOR",
+      "behavior must be 'raw' or 'human'",
+    );
+  }
+  const behaviorOptions = input.behaviorOptions === undefined
+    ? {}
+    : asObject(input.behaviorOptions, "behaviorOptions");
+  for (const field of Object.keys(behaviorOptions)) {
+    if (!TASK_BEHAVIOR_OPTION_FIELDS.has(field)) {
+      throw new MoneyHandError(
+        "INVALID_TASK_BEHAVIOR",
+        `Unknown behaviorOptions field '${field}'`,
+      );
+    }
+  }
+  if (mode === "raw" && Object.keys(behaviorOptions).length > 0) {
+    throw new MoneyHandError(
+      "INVALID_TASK_BEHAVIOR",
+      "behaviorOptions are only valid for human behavior",
+    );
+  }
+  return mode === "raw"
+    ? { mode, method: "behavior.reset", params: {} }
+    : {
+        mode,
+        method: "behavior.set",
+        params: { mode, ttlMs: 30 * 60_000, ...behaviorOptions },
+      };
+}
+
+function taskSpaceTabId(space, value) {
+  if (value !== undefined) {
+    const tabId = requiredInteger(value, 1, 2_147_483_647, "tabId");
+    if (!space.tabIds.includes(tabId)) {
+      throw new MoneyHandError(
+        "TASK_SPACE_TAB_MISMATCH",
+        `tabId ${tabId} is not owned by taskSpace '${space.id}'`,
+      );
+    }
+    return tabId;
+  }
+  if (space.tabIds.length !== 1) {
+    throw new MoneyHandError(
+      "TASK_TAB_REQUIRED",
+      "The taskSpace must own exactly one tab when tabId is omitted",
+    );
+  }
+  return space.tabIds[0];
+}
+
+function semanticNavigationUrl(resolved) {
+  const rawHref = resolved?.node?.href ?? resolved?.node?.properties?.url;
+  if (typeof rawHref !== "string" || rawHref.length < 1) {
+    throw new MoneyHandError(
+      "SEMANTIC_LINK_REQUIRED",
+      "The semantic ref has no href; capture a fresh snapshot and choose a link node",
+    );
+  }
+  let url;
+  try {
+    url = new URL(rawHref, resolved.guard?.url).href;
+  } catch {
+    throw new MoneyHandError(
+      "INVALID_SEMANTIC_LINK",
+      "The semantic ref href cannot be resolved against its captured page URL",
+      { href: rawHref },
+    );
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    throw new MoneyHandError(
+      "UNSAFE_SEMANTIC_LINK",
+      "navigateSemanticRef accepts only http or https links",
+      { protocol: new URL(url).protocol },
+    );
+  }
+  return url;
+}
+
+function taskScrollDelta(value, fallback, label) {
+  const selected = value === undefined ? fallback : value;
+  if (!Number.isFinite(selected) || selected < -100_000 || selected > 100_000) {
+    throw new MoneyHandError(
+      "INVALID_TASK_SCROLL",
+      `${label} must be a finite number between -100000 and 100000`,
+    );
+  }
+  return selected;
+}
+
+function taskScrollCoordinate(value, label) {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value) || value < 0 || value > 1_000_000) {
+    throw new MoneyHandError(
+      "INVALID_TASK_SCROLL",
+      `${label} must be a finite non-negative CSS viewport coordinate`,
+    );
+  }
+  return value;
+}
+
+async function taskRetryDelay(milliseconds, signal) {
+  if (signal?.aborted) {
+    throw new MoneyHandError("ABORTED", "Task retry was aborted before another dispatch");
+  }
+  await new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timer);
+      cleanup();
+      rejectPromise(new MoneyHandError(
+        "ABORTED",
+        "Task retry was aborted before another dispatch",
+      ));
+    };
+    if (signal) {
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    }
+  });
+}
+
 function sessionSummary(session) {
   if (!session) return null;
   return {
@@ -341,6 +591,102 @@ function normalizedError(error, fallbackCode = "MONEYHAND_ERROR") {
     output.handRequestId = error.id ?? error?.details?.id;
   }
   return output;
+}
+
+function visualFallbackTrigger(operation, reason) {
+  const source = reason && typeof reason === "object" ? reason : {};
+  const details = source.details && typeof source.details === "object" ? source.details : {};
+  return {
+    operation: typeof operation === "string" && operation.length > 0
+      ? operation.slice(0, 128)
+      : "page-operation",
+    code: typeof source.code === "string" && source.code.length > 0
+      ? source.code.slice(0, 128)
+      : "PAGE_ANOMALY",
+    message: typeof source.message === "string" && source.message.length > 0
+      ? source.message.slice(0, 4_096)
+      : "The current browser page requires visual inspection",
+    actionDispatched: source.actionDispatched === true || details.actionDispatched === true,
+    retry: typeof source.retry === "string"
+      ? source.retry.slice(0, 128)
+      : (typeof details.retry === "string" ? details.retry.slice(0, 128) : "inspect-before-next-action"),
+  };
+}
+
+function taskVisualErrorEligible(operation, error) {
+  if (!TASK_AUTO_VISUAL_METHODS.has(operation)) return false;
+  const code = typeof error?.code === "string" ? error.code : "MONEYHAND_ERROR";
+  return !TASK_VISUAL_SKIP_CODES.has(code);
+}
+
+function taskVisualResultReason(operation, result) {
+  if (!result || typeof result !== "object") return undefined;
+  if (result.status === "needs_instruction") {
+    return {
+      ...(result.error && typeof result.error === "object" ? result.error : {}),
+      actionDispatched: result.error?.details?.actionDispatched === true,
+      retry: "inspect-before-next-action",
+    };
+  }
+  if ((operation === "request" || operation === "taskRequest") && result.ok === false) {
+    return result.error && typeof result.error === "object"
+      ? result.error
+      : { code: "HAND_REQUEST_FAILED", message: "The browser request failed" };
+  }
+  if (operation === "parallelTaskRequests" && Array.isArray(result.results)) {
+    const failed = result.results.find((entry) => entry?.ok === false || entry?.value?.ok === false);
+    if (failed?.error && typeof failed.error === "object") return failed.error;
+    if (failed?.value?.error && typeof failed.value.error === "object") return failed.value.error;
+  }
+  return undefined;
+}
+
+function taskVisibleTerminal(result, visualFallback) {
+  const stripNeedInternals = (terminal) => {
+    if (!terminal || typeof terminal !== "object" || terminal.status !== "needs_instruction") {
+      return terminal;
+    }
+    const context = terminal.need?.context && typeof terminal.need.context === "object"
+      ? { ...terminal.need.context }
+      : {};
+    delete context.target;
+    return {
+      ...terminal,
+      need: {
+        context,
+        resolution: "resolveTaskBlocker",
+      },
+    };
+  };
+  const visible = stripNeedInternals(result);
+  if (Array.isArray(visible?.results)) {
+    return {
+      ...visible,
+      results: visible.results.map((entry) => entry?.value === undefined
+        ? entry
+        : { ...entry, value: stripNeedInternals(entry.value) }),
+      visualFallback,
+    };
+  }
+  return { ...visible, visualFallback };
+}
+
+function attachTaskVisualFallback(error, visualFallback) {
+  if (!error || typeof error !== "object") {
+    return new MoneyHandError(
+      "MONEYHAND_ERROR",
+      String(error),
+      { visualFallback },
+    );
+  }
+  const details = error.details && typeof error.details === "object" ? { ...error.details } : {};
+  if (visualFallback.waitingForInstruction === true) {
+    delete details.waitId;
+    delete details.tabId;
+    details.resolution = "resolveTaskBlocker";
+  }
+  error.details = { ...details, visualFallback };
+  return error;
 }
 
 function selectedMetrics(metrics) {
@@ -485,6 +831,16 @@ function directHandValue(terminal, options = {}) {
     throw new MoneyHandError(fallbackCode, `${label} returned an invalid result`);
   }
   return terminal.result;
+}
+
+function viewportCaptureWasDispatched(terminal) {
+  const details = terminal?.error?.details;
+  const candidates = [details, details?.cause];
+  return candidates.some((candidate) => Array.isArray(candidate?.results)
+    && candidate.results.some((step) => step?.index === 3
+      && step?.method === "cdp.send"
+      && step?.ok === true
+      && step?.result?.method === "Page.captureScreenshot"));
 }
 
 function flattenSemanticFrameTree(frameTree) {
@@ -1773,6 +2129,7 @@ export class MoneyHand extends EventEmitter {
     this.siteLearnings = new SiteLearningRegistry();
     this.rateController = input.rateController
       ?? createRateController(input.rateControlOptions ?? {});
+    this.taskWindows = new Map();
     this.semanticSnapshots = new Map();
     this.taskPageLocks = new Map();
     this.started = false;
@@ -1787,6 +2144,7 @@ export class MoneyHand extends EventEmitter {
 
   async stop(options = {}) {
     try {
+      await this.cleanupOwnedTaskWindows().catch(() => {});
       return await this.peer.stop(options);
     } finally {
       this.started = this.peer.state === "RUNNING";
@@ -1807,10 +2165,10 @@ export class MoneyHand extends EventEmitter {
       automaticConnection: {
         command: "--connect",
         resultSchema: MONEYHAND_CONNECT_RESULT_SCHEMA,
-        successNextAction: "ask_user_for_task",
+        successNextAction: CONNECT_READY_NEXT_ACTION,
         userRetryFlag: "--after-user-action",
         maximumUserConfirmedRetries: 1,
-        runsBrowserOperation: false,
+        runsBrowserOperation: true,
         outerOkMeaning: "bounded-result-produced",
         connectedPredicate: "value.connected=true-and-value.status=connected",
         endpoint: "ws://127.0.0.1:19846/extension",
@@ -1820,6 +2178,33 @@ export class MoneyHand extends EventEmitter {
         extensionFirstRunAutoEnabled: true,
         popupAction: "immediate-reconnect",
         fullPreflightRequired: false,
+        automaticAcceptance: {
+          schema: "npc-moneyhand-connect-acceptance/1",
+          mandatoryOnNormalConnect: true,
+          scope: "localhost-owned-task-window",
+          externalWebsiteRequested: false,
+          streamsProgress: true,
+          closesTaskWindow: true,
+          resetsBehaviorToRaw: true,
+          removesDownloadArtifact: true,
+          checks: [
+            "task_context_and_human_mode",
+            "localhost_navigation",
+            "semantic_snapshot",
+            "text_input",
+            "pointer_click",
+            "checkbox",
+            "select",
+            "upload",
+            "human_scroll",
+            "bounded_cdp_read",
+            "viewport_screenshot",
+            "full_page_screenshot",
+            "download",
+            "download_cleanup",
+            "task_window_and_behavior_cleanup",
+          ],
+        },
         reusesLiveSession: true,
         startsListener: true,
         startsBrowserWhenNeeded: true,
@@ -1860,9 +2245,26 @@ export class MoneyHand extends EventEmitter {
           maxInflight: MAX_JSONL_INFLIGHT,
         },
         taskModule: {
-          cliFlag: "--task",
-          trustedLocalCode: true,
+          flag: "--task",
+          requiredExport: "run",
+          signature: "run({ moneyhand, signal, args, progress })",
+          security: "trusted-local-code",
           resultId: "task",
+          timeoutFlag: "--task-timeout-ms",
+          defaultTimeoutMs: DEFAULT_TASK_TIMEOUT_MS,
+          maximumTimeoutMs: MAX_TASK_TIMEOUT_MS,
+          timeoutResultCode: "TASK_TIMEOUT",
+          unacknowledgedAbort: "fail-closed-controller-exit",
+          progressEvent: "moneyhand.task_progress",
+          progressSchema: "npc-moneyhand-task-progress/1",
+          attachedMonitorEvent: "moneyhand.task_monitor",
+          attachedMonitorSchema: "npc-moneyhand-task-monitor/1",
+          attachedMonitorIntervalMs: ATTACHED_TASK_MONITOR_INTERVAL_MS,
+          automaticProgressIntervalMs: DEFAULT_TASK_PROGRESS_INTERVAL_MS,
+          automaticVisualSilenceMs: DEFAULT_TASK_VISUAL_SILENCE_MS,
+          watchdogThresholdsCanOnlyTighten: true,
+          monitoringStartsBeforeModuleImport: true,
+          watchdogPausedAndDrainedBeforeTaskCleanup: true,
         },
         directCall: {
           connectFlag: "--connect",
@@ -1871,6 +2273,29 @@ export class MoneyHand extends EventEmitter {
           autoLaunchBrowser: true,
           stdinRequired: false,
           resultId: "call",
+        },
+        builtInController: {
+          protocol: CONTROLLER_SERVICE_PROTOCOL,
+          product: CONTROLLER_SERVICE_PRODUCT,
+          version: CONTROLLER_SERVICE_VERSION,
+          endpoint: `${DEFAULT_CONTROLLER_HOST}:${DEFAULT_CONTROLLER_PORT}`,
+          startup: "implicit-on-connect-call-or-task",
+          installation: "bundled-in-the-skill-no-separate-software",
+          reuse: "same-runtime-build-across-agent-install-paths-one-controller-process-serializes-local-commands",
+          compatibilityFields: ["protocol", "product", "version", "build"],
+          auditFields: ["sourceId", "pid", "instanceNonce"],
+          buildScope: "package-json-plus-scripts-recursive-mjs",
+          privateRequestProof: "32-byte-random-token-from-user-private-state-never-status",
+          stateSchema: "npc-moneyhand-controller-state/1",
+          stateLocation: "os-temp-user-private-per-port",
+          unknownOccupant: "fail-closed-without-stop-or-state-delete",
+          staleUpgrade: "valid-owned-state-plus-two-port-refusals",
+          halfOpenSocketShutdown: "destroy-accepted-sockets-before-server-close-wait",
+          autoLaunchedBrowserCleanup: "close-unchanged-unique-bootstrap-tab-after-task",
+          bootstrapCaptureRace: "retain-unique-provisional-marker-after-handshake-exact-cleanup-only",
+          idleExitMs: DEFAULT_CONTROLLER_IDLE_MS,
+          publicStopFlag: "--stop",
+          publicStopScope: "this-authenticated-controller-instance-only",
         },
       },
       operations: {
@@ -2109,6 +2534,7 @@ export class MoneyHand extends EventEmitter {
         callerPageJavaScript: false,
         readinessProbe: "Page.getFrameTree-plus-fixed-document.readyState-batch",
         eventDependency: false,
+        defaultWaitUntil: DEFAULT_PAGE_WAIT_UNTIL,
         defaultTimeoutMs: 30_000,
         maximumTimeoutMs: MAX_PAGE_WAIT_TIMEOUT_MS,
         timeoutMeaning: "document-readiness-budget-after-navigation-dispatch",
@@ -2116,10 +2542,11 @@ export class MoneyHand extends EventEmitter {
         defaultPollIntervalMs: 100,
         defaultStablePolls: 2,
         maximumObservations: MAX_PAGE_WAIT_OBSERVATIONS,
+        transientReadRecovery: "retry-within-the-same-bounded-observation-budget",
         sameProfileTabConcurrency: "fail-closed",
         differentProfileOrTabConcurrency: true,
         redirectPolicy: "observe-final-stable-frame-state; optional-fixed-url-match",
-        commitClaim: "Page.navigate-command-acknowledged-only",
+        commitClaim: "Page.navigate-or-owned-marker-tabs.update-command-acknowledged-only",
         readyClaim: "document-readiness-only-not-business-success",
         timeoutAfterNavigation: "action-dispatched-inspect-before-retry",
       },
@@ -2137,6 +2564,83 @@ export class MoneyHand extends EventEmitter {
           confirmation: "owned-by-invoking-agent-or-specialized-skill",
           activity: "bounded-agent-local-ledger",
         },
+      },
+      taskRuntime: {
+        helpers: [...TASK_MODULE_HELPERS],
+        targetSelection: "latest-focused-profile-once-then-dedicated-owned-window",
+        taskWindow: {
+          creation: "one-new-normal-window-with-unique-about-blank-fragment-marker",
+          ownership: "controller-task-id-plus-window-id-plus-single-tab-marker",
+          cleanup: "close-exact-owned-window-in-finally-never-existing-user-windows",
+          changedWindow: "fail-closed-without-window-remove",
+        },
+        initialPageHealthProbe: "exact-window-and-single-tab-ownership-marker-before-task-binding",
+        firstNavigation: "owned-about-blank-marker-tabs.update-then-cdp-readiness",
+        healthRecovery: "marker-ownership-before-first-navigation-then-bounded-cdp-probe",
+        defaultBehavior: "raw",
+        humanInputPath: "input.perform",
+        humanJavaScriptScroll: false,
+        semanticLinkNavigation: "fresh-ref-href-to-guarded-navigation",
+        visualFallback: {
+          mode: "automatic-broad-page-anomaly",
+          operation: "inspectTaskBlocker",
+          resolutionOperation: "resolveTaskBlocker",
+          triggers: [
+            "needs-instruction",
+            "navigation-timeout-or-unknown",
+            "page-health-or-readiness-failure",
+            "semantic-missing-ambiguous-stale-or-occluded",
+            "browser-input-or-postcondition-failure",
+            "task-progress-silence",
+            "task-terminal-failure-timeout-or-incomplete",
+            "task-event-loop-recovery-after-silence",
+            "other-task-page-operation-failure",
+          ],
+          excluded: [
+            "connection-not-established",
+            "no-pinned-task-page",
+            "artifact-filesystem-failure",
+            "rate-control-only-state",
+          ],
+          image: "one-current-viewport-local-png-per-anomaly",
+          maximumAutomaticCapturesPerTask: MAX_AUTOMATIC_VISUAL_FALLBACKS,
+          returnsBoundedText: true,
+          hidesWaitIdTabIdAndBase64: true,
+          preservesInstructionWait: true,
+          actionReplay: false,
+        },
+        progress: {
+          event: "moneyhand.task_progress",
+          schema: "npc-moneyhand-task-progress/1",
+          attachedMonitorEvent: "moneyhand.task_monitor",
+          attachedMonitorSchema: "npc-moneyhand-task-monitor/1",
+          attachedMonitorIntervalMs: ATTACHED_TASK_MONITOR_INTERVAL_MS,
+          automaticIntervalMs: DEFAULT_TASK_PROGRESS_INTERVAL_MS,
+          visualSilenceMs: DEFAULT_TASK_VISUAL_SILENCE_MS,
+          watchdogPollMaximumMs: MAX_TASK_WATCHDOG_POLL_MS,
+          thresholdsCanOnlyTighten: true,
+          startsBeforeModuleImport: true,
+          explicitCallback: "progress({phase,message,current,total,checkpoint})",
+          streamsBeforeTaskCompletion: true,
+          screenshotOnSilence: true,
+          screenshotBeforeTaskTimeoutAbort: true,
+          screenshotBeforeCleanupOnTerminalAnomaly: true,
+          watchdogPausedAndDrainedBeforeTaskCleanup: true,
+          screenshotActionReplay: false,
+        },
+        screenshotRetry: {
+          operation: "captureStableViewport",
+          transientCode: "STALE_VIEWPORT",
+          defaultMaximumAttempts: 3,
+          otherErrorsRetried: false,
+        },
+        fullPageCapture: {
+          operation: "captureFullPage",
+          observationOnly: true,
+          coordinateMapping: false,
+          maximumDecodedBytes: 4_194_304,
+        },
+        cleanup: "behavior-reset-owned-window-close-and-task-space-complete",
       },
       siteLearnings: {
         versioned: true,
@@ -3430,7 +3934,7 @@ export class MoneyHand extends EventEmitter {
     if (input.effect === undefined) {
       throw new MoneyHandError(
         "TASK_EFFECT_REQUIRED",
-        `${operation} requires effect '${expectedEffect}'`,
+        `${operation} requires top-level effect '${expectedEffect}' alongside taskSpaceId and tabId`,
       );
     }
     const effect = normalizeTaskEffect(input.effect);
@@ -3479,6 +3983,7 @@ export class MoneyHand extends EventEmitter {
     const target = { tabId: plan.tabId };
     const terminal = await session.request({
       method: "batch.run",
+      behavior: TASK_INTERNAL_BEHAVIOR,
       params: {
         steps: [
           {
@@ -3512,11 +4017,14 @@ export class MoneyHand extends EventEmitter {
     const actionDispatched = options.actionDispatched === true;
     const deadline = Date.now() + plan.timeoutMs;
     const startedAt = Date.now();
+    let attempts = 0;
     let observations = 0;
     let stablePolls = 0;
     let previousKey;
     let latest;
-    while (observations < Math.max(1, plan.maximumObservations)) {
+    let lastReadError;
+    while (attempts < Math.max(1, plan.maximumObservations)) {
+      attempts += 1;
       const remaining = Math.max(1, deadline - Date.now());
       const requestTimeoutMs = Math.max(
         1,
@@ -3525,18 +4033,14 @@ export class MoneyHand extends EventEmitter {
       try {
         latest = await this.#readTaskPageState(session, plan, input, requestTimeoutMs);
       } catch (error) {
-        throw new MoneyHandError(
-          actionDispatched ? "NAVIGATION_OUTCOME_UNKNOWN" : "PAGE_WAIT_FAILED",
-          actionDispatched
-            ? "Navigation was dispatched but the final page state could not be read"
-            : "The read-only page state could not be read",
-          {
-            actionDispatched,
-            retry: actionDispatched ? "inspect-before-retry" : "safe-to-recheck",
-            cause: normalizedError(error, "PAGE_STATE_READ_FAILED"),
-            ...(latest === undefined ? {} : { latest }),
-          },
+        lastReadError = error;
+        if (Date.now() >= deadline || attempts >= plan.maximumObservations) break;
+        await taskPagePollDelay(
+          Math.min(plan.pollIntervalMs, Math.max(1, deadline - Date.now())),
+          input.signal,
+          actionDispatched,
         );
+        continue;
       }
       observations += 1;
       if (taskPageStateMatches(latest, plan, options.transition)) {
@@ -3557,11 +4061,25 @@ export class MoneyHand extends EventEmitter {
         previousKey = undefined;
         stablePolls = 0;
       }
-      if (Date.now() >= deadline || observations >= plan.maximumObservations) break;
+      if (Date.now() >= deadline || attempts >= plan.maximumObservations) break;
       await taskPagePollDelay(
         Math.min(plan.pollIntervalMs, Math.max(1, deadline - Date.now())),
         input.signal,
         actionDispatched,
+      );
+    }
+    if (latest === undefined && lastReadError !== undefined) {
+      throw new MoneyHandError(
+        actionDispatched ? "NAVIGATION_OUTCOME_UNKNOWN" : "PAGE_WAIT_FAILED",
+        actionDispatched
+          ? "Navigation was dispatched but no final page state could be read after bounded recovery"
+          : "The read-only page state could not be read after bounded recovery",
+        {
+          actionDispatched,
+          retry: actionDispatched ? "inspect-before-retry" : "safe-to-recheck",
+          attempts,
+          cause: normalizedError(lastReadError, "PAGE_STATE_READ_FAILED"),
+        },
       );
     }
     throw new MoneyHandError(
@@ -3574,7 +4092,11 @@ export class MoneyHand extends EventEmitter {
         retry: actionDispatched ? "inspect-before-retry" : "safe-to-recheck",
         waitUntil: plan.waitUntil,
         observations,
+        attempts,
         stablePolls,
+        ...(lastReadError === undefined ? {} : {
+          lastReadError: normalizedError(lastReadError, "PAGE_STATE_READ_FAILED"),
+        }),
         ...(plan.expectedUrl === undefined ? {} : {
           expectedUrl: plan.expectedUrl,
           urlMatch: plan.urlMatch,
@@ -3582,6 +4104,596 @@ export class MoneyHand extends EventEmitter {
         ...(latest === undefined ? {} : { latest }),
       },
     );
+  }
+
+  async #listBrowserWindows(session, input = {}) {
+    const terminal = await session.request({
+      method: "chrome.call",
+      behavior: TASK_INTERNAL_BEHAVIOR,
+      params: { method: "windows.getAll", args: [{ populate: true }] },
+    }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+    const value = directHandValue(terminal, {
+      code: "TASK_WINDOW_INSPECTION_FAILED",
+      label: "Task window inspection",
+    });
+    if (value.method !== "windows.getAll" || !Array.isArray(value.result)) {
+      throw new MoneyHandError(
+        "INVALID_TASK_WINDOW_RESULT",
+        "windows.getAll returned an invalid task-window result",
+      );
+    }
+    return value.result;
+  }
+
+  #matchOwnedTaskWindow(windows, record, options = {}) {
+    const candidates = windows.filter((window) => window
+      && typeof window === "object"
+      && Number.isInteger(window.id)
+      && (record.windowId === undefined || window.id === record.windowId)
+      && window.type === "normal"
+      && Array.isArray(window.tabs)
+      && window.tabs.length === 1
+      && Number.isInteger(window.tabs[0]?.id)
+      && window.tabs[0].id > 0
+      && window.tabs[0].windowId === window.id
+      && (options.requireMarker !== true
+        || window.tabs[0].url === record.marker
+        || window.tabs[0].pendingUrl === record.marker)
+      && (record.tabId === undefined || window.tabs[0].id === record.tabId));
+    if (candidates.length === 1) return candidates[0];
+    if (options.allowMissing === true && candidates.length === 0) return null;
+    throw new MoneyHandError(
+      candidates.length === 0 ? "TASK_WINDOW_NOT_FOUND" : "TASK_WINDOW_AMBIGUOUS",
+      candidates.length === 0
+        ? "The task-owned browser window could not be proven"
+        : "More than one browser window matched the task ownership marker",
+      { matches: candidates.length },
+    );
+  }
+
+  async #createOwnedTaskWindow(session, id, input) {
+    const marker = `about:blank#npc-moneyhand-task=${randomUUID()}`;
+    const selector = {
+      profile: session.identity.profile,
+      instanceId: session.identity.instanceId,
+      bootId: session.identity.bootId,
+    };
+    const provisionalRecord = {
+      id,
+      marker,
+      selector,
+      provisional: true,
+      createdAt: new Date().toISOString(),
+    };
+    let acknowledgedWindowId;
+    let activeSession = session;
+    try {
+      const terminal = await session.request({
+        method: "chrome.call",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: {
+          method: "windows.create",
+          args: [{ url: marker, focused: true, type: "normal" }],
+        },
+      }, requestOptions(input, this.peer.requestTimeoutMs));
+      const value = directHandValue(terminal, {
+        code: "TASK_WINDOW_CREATE_FAILED",
+        label: "Task window creation",
+      });
+      if (value.method !== "windows.create"
+        || !Number.isInteger(value.result?.id)
+        || value.result.id < 0) {
+        throw new MoneyHandError(
+          "INVALID_TASK_WINDOW_RESULT",
+          "windows.create returned an invalid task-window result",
+        );
+      }
+      acknowledgedWindowId = value.result.id;
+    } catch (error) {
+      if (!(error instanceof MoneyHandUnknownOutcomeError) && error?.code !== "OUTCOME_UNKNOWN") {
+        throw new MoneyHandError(
+          "TASK_WINDOW_CREATE_FAILED",
+          "The dedicated task window was not created",
+          { actionDispatched: false, cause: normalizedError(error, "TASK_WINDOW_CREATE_FAILED") },
+        );
+      }
+      this.taskWindows.set(id, provisionalRecord);
+      try {
+        activeSession = await this.#sessionFor({
+          ...input,
+          selector,
+          signal: undefined,
+          connectTimeoutMs: Math.min(this.connectTimeoutMs, 2_000),
+        });
+      } catch (reconnectError) {
+        throw new MoneyHandError(
+          "TASK_WINDOW_CREATE_OUTCOME_UNKNOWN",
+          "Task window creation lost its result and the same browser boot could not be inspected",
+          {
+            actionDispatched: true,
+            retry: "do-not-replay",
+            windowCleanup: {
+              attempted: false,
+              ok: false,
+              owned: false,
+              reason: "creation-outcome-unknown",
+            },
+            provisionalRetained: true,
+            cause: normalizedError(reconnectError, "TASK_WINDOW_RECOVERY_FAILED"),
+          },
+        );
+      }
+    }
+    let window;
+    try {
+      const windows = await this.#listBrowserWindows(activeSession, input);
+      window = this.#matchOwnedTaskWindow(windows, {
+        marker,
+        ...(acknowledgedWindowId === undefined ? {} : { windowId: acknowledgedWindowId }),
+      }, { requireMarker: true });
+    } catch (error) {
+      if (acknowledgedWindowId !== undefined) {
+        provisionalRecord.windowId = acknowledgedWindowId;
+      }
+      const windowCleanup = acknowledgedWindowId === undefined
+        ? {
+            attempted: false,
+            ok: false,
+            owned: false,
+            reason: "creation-outcome-unknown",
+          }
+        : await this.#removeAcknowledgedTaskWindow(
+            activeSession,
+            provisionalRecord,
+            input,
+          );
+      if (windowCleanup.ok !== true) {
+        this.taskWindows.set(id, provisionalRecord);
+      } else {
+        this.taskWindows.delete(id);
+      }
+      throw new MoneyHandError(
+        acknowledgedWindowId === undefined
+          ? "TASK_WINDOW_CREATE_OUTCOME_UNKNOWN"
+          : "TASK_WINDOW_VALIDATION_FAILED",
+        "The dedicated task window could not be uniquely validated",
+        {
+          actionDispatched: true,
+          retry: "do-not-replay",
+          windowCleanup,
+          provisionalRetained: windowCleanup.ok !== true,
+          cause: normalizedError(error, "TASK_WINDOW_VALIDATION_FAILED"),
+        },
+      );
+    }
+    const tab = window.tabs[0];
+    const record = {
+      id,
+      marker,
+      windowId: window.id,
+      tabId: tab.id,
+      selector,
+      createdAt: new Date().toISOString(),
+    };
+    this.taskWindows.set(id, record);
+    return { record, tab: { ...tab }, session: activeSession };
+  }
+
+  async #removeAcknowledgedTaskWindow(session, record, input) {
+    let ownershipVerified = false;
+    let closeAttempted = false;
+    try {
+      const inspected = await session.request({
+        method: "chrome.call",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { method: "windows.get", args: [record.windowId, { populate: true }] },
+      }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+      const inspectedValue = directHandValue(inspected, {
+        code: "TASK_WINDOW_COMPENSATION_INSPECTION_FAILED",
+        label: "Task window creation-compensation inspection",
+      });
+      if (inspectedValue.method !== "windows.get"
+        || inspectedValue.result?.id !== record.windowId) {
+        throw new MoneyHandError(
+          "INVALID_TASK_WINDOW_RESULT",
+          "windows.get returned an invalid creation-compensation result",
+        );
+      }
+      const window = inspectedValue.result;
+      const exact = window.type === "normal"
+        && Array.isArray(window.tabs)
+        && window.tabs.length === 1
+        && Number.isInteger(window.tabs[0]?.id)
+        && window.tabs[0].windowId === record.windowId
+        && (window.tabs[0].url === record.marker || window.tabs[0].pendingUrl === record.marker);
+      if (!exact) {
+        return {
+          attempted: true,
+          closeAttempted: false,
+          ok: false,
+          owned: false,
+          windowId: record.windowId,
+          retry: "inspect-before-cleanup",
+          error: {
+            code: "TASK_WINDOW_OWNERSHIP_CHANGED",
+            message: "The newly created task window changed before validation; it was not closed",
+          },
+        };
+      }
+      record.tabId = window.tabs[0].id;
+      ownershipVerified = true;
+      closeAttempted = true;
+      const terminal = await session.request({
+        method: "chrome.call",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { method: "windows.remove", args: [record.windowId] },
+      }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+      const value = directHandValue(terminal, {
+        code: "TASK_WINDOW_COMPENSATION_FAILED",
+        label: "Task window creation compensation",
+      });
+      if (value.method !== "windows.remove" || value.result !== null) {
+        throw new MoneyHandError(
+          "INVALID_TASK_WINDOW_RESULT",
+          "windows.remove returned an invalid creation-compensation result",
+        );
+      }
+      return {
+        attempted: true,
+        closeAttempted: true,
+        ok: true,
+        owned: true,
+        windowId: record.windowId,
+      };
+    } catch (error) {
+      const outcomeUnknown = error instanceof MoneyHandUnknownOutcomeError
+        || error?.code === "OUTCOME_UNKNOWN";
+      return {
+        attempted: true,
+        closeAttempted,
+        ok: false,
+        owned: ownershipVerified,
+        windowId: record.windowId,
+        outcomeUnknown,
+        retry: outcomeUnknown ? "do-not-replay" : "safe-to-recheck",
+        error: normalizedError(error, "TASK_WINDOW_COMPENSATION_FAILED"),
+      };
+    }
+  }
+
+  async #removeOwnedTaskWindow(session, record, input) {
+    const remove = async () => {
+      const terminal = await session.request({
+        method: "chrome.call",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { method: "windows.remove", args: [record.windowId] },
+      }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+      const value = directHandValue(terminal, {
+        code: "TASK_WINDOW_CLOSE_FAILED",
+        label: "Task window close",
+      });
+      if (value.method !== "windows.remove" || value.result !== null) {
+        throw new MoneyHandError(
+          "INVALID_TASK_WINDOW_RESULT",
+          "windows.remove returned an invalid task-window result",
+        );
+      }
+    };
+    try {
+      await remove();
+    } catch (error) {
+      const waiting = error?.code === "TAB_WAITING"
+        ? (error.details?.cause ?? error.details)
+        : undefined;
+      if (waiting?.tabId !== record.tabId || typeof waiting?.waitId !== "string") throw error;
+      const terminal = await session.request({
+        method: "instruction.resolve",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { tabId: record.tabId, waitId: waiting.waitId, action: "cancel" },
+      }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+      const resolved = directHandValue(terminal, {
+        code: "TASK_WINDOW_WAIT_CANCEL_FAILED",
+        label: "Task window wait cancellation",
+      });
+      if (resolved.tabId !== record.tabId
+        || resolved.waitId !== waiting.waitId
+        || resolved.action !== "cancel"
+        || resolved.waiting !== false) {
+        throw new MoneyHandError(
+          "INVALID_TASK_WINDOW_RESULT",
+          "instruction.resolve did not cancel the exact task-tab wait",
+        );
+      }
+      const windows = await this.#listBrowserWindows(session, input);
+      this.#matchOwnedTaskWindow(windows, record, { requireMarker: record.provisional === true });
+      await remove();
+    }
+  }
+
+  async #closeOwnedTaskWindow(id, input = {}) {
+    const record = this.taskWindows.get(id);
+    if (!record) {
+      return { attempted: false, ok: true, alreadyClosed: false, owned: false };
+    }
+    let session;
+    try {
+      session = await this.#sessionFor({
+        ...input,
+        selector: record.selector,
+        signal: undefined,
+        connectTimeoutMs: Math.min(this.connectTimeoutMs, 2_000),
+      });
+      const windows = await this.#listBrowserWindows(session, input);
+      if (record.windowId === undefined) {
+        const ownedWindow = this.#matchOwnedTaskWindow(windows, record, {
+          requireMarker: true,
+        });
+        record.windowId = ownedWindow.id;
+        record.tabId = ownedWindow.tabs[0].id;
+        await this.#removeOwnedTaskWindow(session, record, input);
+        this.taskWindows.delete(id);
+        return {
+          attempted: true,
+          ok: true,
+          alreadyClosed: false,
+          owned: true,
+          windowId: record.windowId,
+          tabId: record.tabId,
+        };
+      }
+      const sameId = windows.find((window) => window?.id === record.windowId);
+      if (!sameId) {
+        this.taskWindows.delete(id);
+        return {
+          attempted: true,
+          ok: true,
+          alreadyClosed: true,
+          owned: true,
+          windowId: record.windowId,
+          tabId: record.tabId,
+        };
+      }
+      const ownedWindow = this.#matchOwnedTaskWindow(windows, record, {
+        requireMarker: record.provisional === true,
+      });
+      const removalRecord = record.tabId === undefined
+        ? { ...record, tabId: ownedWindow.tabs[0].id }
+        : record;
+      await this.#removeOwnedTaskWindow(session, removalRecord, input);
+      this.taskWindows.delete(id);
+      return {
+        attempted: true,
+        ok: true,
+        alreadyClosed: false,
+        owned: true,
+        windowId: record.windowId,
+        tabId: record.tabId,
+      };
+    } catch (error) {
+      if (error instanceof MoneyHandUnknownOutcomeError || error?.code === "OUTCOME_UNKNOWN") {
+        try {
+          session = await this.#sessionFor({
+            ...input,
+            selector: record.selector,
+            signal: undefined,
+            connectTimeoutMs: Math.min(this.connectTimeoutMs, 2_000),
+          });
+          const windows = await this.#listBrowserWindows(session, input);
+          if (!windows.some((window) => window?.id === record.windowId)) {
+            this.taskWindows.delete(id);
+            return {
+              attempted: true,
+              ok: true,
+              alreadyClosed: true,
+              owned: true,
+              windowId: record.windowId,
+              tabId: record.tabId,
+            };
+          }
+        } catch {
+          // Preserve the ownership record; a later bounded cleanup may retry inspection.
+        }
+      }
+      return {
+        attempted: true,
+        ok: false,
+        alreadyClosed: false,
+        owned: true,
+        windowId: record.windowId,
+        tabId: record.tabId,
+        error: normalizedError(error, "TASK_WINDOW_CLOSE_FAILED"),
+      };
+    }
+  }
+
+  async beginTaskContext(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "beginTaskContext options");
+    const id = requiredTaskSpaceId(
+      input.id ?? input.taskSpaceId ?? `task-${randomUUID()}`,
+    );
+    const behaviorPlan = taskBehaviorPlan(input);
+    const initialSession = await this.#sessionFor(input);
+    if (this.taskSpaces.list().some((space) => space.id === id) || this.taskWindows.has(id)) {
+      throw new MoneyHandError("TASK_SPACE_EXISTS", `taskSpace '${id}' already exists`);
+    }
+    const { tab, session } = await this.#createOwnedTaskWindow(initialSession, id, input);
+    // The ownership marker deliberately lives on about:blank so creating a Task
+    // Space never requests an external site. Chrome exposes that marker through
+    // tabs/windows APIs, but chrome.debugger cannot read its document without a
+    // host permission. The exact normal-window + single-tab + marker validation
+    // above is therefore the readiness proof until the first real navigation.
+    const initialPageGuard = null;
+    let taskSpace;
+    try {
+      taskSpace = this.taskSpaces.create({
+        id,
+        name: input.name,
+        tabIds: [tab.id],
+        selector: {
+          profile: session.identity.profile,
+          instanceId: session.identity.instanceId,
+          bootId: session.identity.bootId,
+        },
+      });
+    } catch (error) {
+      const windowCleanup = await this.#closeOwnedTaskWindow(id, input);
+      throw new MoneyHandError(
+        error?.code ?? "TASK_SPACE_CREATE_FAILED",
+        String(error?.message ?? "The task context could not be created"),
+        { windowCleanup },
+      );
+    }
+    let behavior;
+    try {
+      const behaviorTerminal = await session.request({
+        method: behaviorPlan.method,
+        params: behaviorPlan.params,
+      }, requestOptions(input, this.peer.requestTimeoutMs));
+      behavior = directHandValue(behaviorTerminal, {
+        code: "TASK_BEHAVIOR_FAILED",
+        label: "Task behavior setup",
+      });
+      if (behavior.behavior?.mode !== behaviorPlan.mode) {
+        throw new MoneyHandError(
+          "INVALID_TASK_BEHAVIOR_RESULT",
+          "The Extension did not confirm the requested task behavior",
+        );
+      }
+    } catch (error) {
+      let behaviorReset = { attempted: true, ok: false, value: null };
+      try {
+        const resetTerminal = await session.request({
+          method: "behavior.reset",
+          params: {},
+        }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+        const resetValue = directHandValue(resetTerminal, {
+          code: "TASK_BEHAVIOR_RESET_FAILED",
+          label: "Failed task behavior reset",
+        });
+        behaviorReset = {
+          attempted: true,
+          ok: resetValue.behavior?.mode === "raw",
+          value: resetValue,
+        };
+      } catch (resetError) {
+        behaviorReset = {
+          attempted: true,
+          ok: false,
+          value: null,
+          error: normalizedError(resetError, "TASK_BEHAVIOR_RESET_FAILED"),
+        };
+      }
+      this.taskSpaces.complete(id, { keep: false });
+      const windowCleanup = await this.#closeOwnedTaskWindow(id, input);
+      throw new MoneyHandError(
+        "TASK_BEHAVIOR_FAILED",
+        "The dedicated task page was bound, but task behavior could not be established",
+        {
+          cause: normalizedError(error, "TASK_BEHAVIOR_FAILED"),
+          behaviorReset,
+          windowCleanup,
+        },
+      );
+    }
+    return {
+      id,
+      taskId: id,
+      taskSpaceId: id,
+      selector: { ...taskSpace.selector },
+      tabId: tab.id,
+      page: {
+        ownedWindow: true,
+        tabId: tab.id,
+        windowId: Number.isInteger(tab.windowId) ? tab.windowId : null,
+        title: typeof tab.title === "string" ? tab.title.slice(0, 2_048) : "",
+        url: typeof tab.url === "string" ? tab.url.slice(0, 16_384) : "",
+        status: typeof tab.status === "string" ? tab.status : null,
+        guard: initialPageGuard,
+      },
+      behavior: behavior.behavior,
+      behaviorExpiresAt: behavior.expiresAt ?? null,
+      taskSpace,
+    };
+  }
+
+  async probeTaskContext(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "probeTaskContext options");
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const probeInput = {
+      ...input,
+      selector: space.selector,
+      connectTimeoutMs: input.connectTimeoutMs ?? 1_500,
+      timeoutMs: input.timeoutMs ?? 3_000,
+    };
+    let session;
+    try {
+      session = await this.#sessionFor(probeInput);
+    } catch (error) {
+      return {
+        healthy: false,
+        taskSpaceId: space.id,
+        tabId,
+        stage: "session",
+        nextAction: "end-task-and-run-fixed-connect-flow-once",
+        error: normalizedError(error, "TASK_SESSION_UNHEALTHY"),
+      };
+    }
+    try {
+      const tabTerminal = await session.request({
+        method: "chrome.call",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { method: "tabs.get", args: [tabId] },
+      }, requestOptions(probeInput, this.peer.requestTimeoutMs));
+      const tabValue = directHandValue(tabTerminal, {
+        code: "TASK_TAB_UNHEALTHY",
+        label: "Task tab health probe",
+      });
+      if (tabValue.method !== "tabs.get" || tabValue.result?.id !== tabId) {
+        throw new MoneyHandError("TASK_TAB_UNHEALTHY", "tabs.get did not confirm the pinned tab");
+      }
+      const ownership = this.taskWindows.get(space.id);
+      if (ownership?.tabId === tabId
+        && ownership.windowId === tabValue.result.windowId
+        && (tabValue.result.url === ownership.marker
+          || tabValue.result.pendingUrl === ownership.marker)) {
+        return {
+          healthy: true,
+          taskSpaceId: space.id,
+          tabId,
+          stage: "ownership-marker",
+          guard: null,
+        };
+      }
+      const pageTerminal = await session.request({
+        method: "cdp.send",
+        behavior: TASK_INTERNAL_BEHAVIOR,
+        params: { target: { tabId }, method: "Page.getFrameTree", params: {} },
+      }, requestOptions(probeInput, this.peer.requestTimeoutMs));
+      const guard = semanticMainFrame(directCdpValue(
+        pageTerminal,
+        "Page.getFrameTree",
+        { code: "TASK_PAGE_UNHEALTHY", label: "Task page health probe" },
+      ), "TASK_PAGE_UNHEALTHY");
+      return {
+        healthy: true,
+        taskSpaceId: space.id,
+        tabId,
+        stage: "ready",
+        guard,
+      };
+    } catch (error) {
+      return {
+        healthy: false,
+        taskSpaceId: space.id,
+        tabId,
+        stage: "page",
+        nextAction: "preserve-state-then-end-task-and-run-fixed-connect-flow-once",
+        error: normalizedError(error, "TASK_PAGE_UNHEALTHY"),
+      };
+    }
   }
 
   async waitForTaskPage(options = {}) {
@@ -3606,8 +4718,34 @@ export class MoneyHand extends EventEmitter {
     const session = await this.#sessionFor({ ...input, selector: space.selector });
     return await this.#withTaskPageLock(space, plan.tabId, "navigateTaskTab", async () => {
       let before;
+      let ownershipMarker = false;
       try {
-        before = await this.#readTaskPageState(session, plan, input);
+        const ownership = this.taskWindows.get(space.id);
+        if (ownership?.tabId === plan.tabId && Number.isInteger(ownership.windowId)) {
+          const tabTerminal = await session.request({
+            method: "chrome.call",
+            behavior: TASK_INTERNAL_BEHAVIOR,
+            params: { method: "tabs.get", args: [plan.tabId] },
+          }, requestOptions(input, this.peer.requestTimeoutMs));
+          const tabValue = directHandValue(tabTerminal, {
+            code: "NAVIGATION_PREFLIGHT_FAILED",
+            label: "Task ownership-marker navigation preflight",
+          });
+          const tab = tabValue.method === "tabs.get" ? tabValue.result : null;
+          ownershipMarker = tab?.id === plan.tabId
+            && tab.windowId === ownership.windowId
+            && (tab.url === ownership.marker || tab.pendingUrl === ownership.marker);
+          if (ownershipMarker) {
+            before = {
+              frameId: null,
+              loaderId: null,
+              url: ownership.marker,
+              readyState: null,
+              ownershipMarker: true,
+            };
+          }
+        }
+        if (!ownershipMarker) before = await this.#readTaskPageState(session, plan, input);
       } catch (error) {
         throw new MoneyHandError(
           "NAVIGATION_PREFLIGHT_FAILED",
@@ -3622,8 +4760,13 @@ export class MoneyHand extends EventEmitter {
 
       let terminal;
       try {
-        terminal = await session.request({
+        terminal = await session.request(ownershipMarker ? {
+          method: "chrome.call",
+          behavior: TASK_INTERNAL_BEHAVIOR,
+          params: { method: "tabs.update", args: [plan.tabId, { url: plan.url }] },
+        } : {
           method: "cdp.send",
+          behavior: TASK_INTERNAL_BEHAVIOR,
           params: {
             target: { tabId: plan.tabId },
             method: "Page.navigate",
@@ -3637,7 +4780,7 @@ export class MoneyHand extends EventEmitter {
         if (error instanceof MoneyHandUnknownOutcomeError || error?.code === "OUTCOME_UNKNOWN") {
           throw new MoneyHandError(
             "NAVIGATION_OUTCOME_UNKNOWN",
-            "The Page.navigate request lost its terminal outcome; inspect the tab before retrying",
+            "The navigation request lost its terminal outcome; inspect the tab before retrying",
             {
               actionDispatched: true,
               dispatchState: "unknown",
@@ -3649,7 +4792,7 @@ export class MoneyHand extends EventEmitter {
         }
         throw new MoneyHandError(
           "NAVIGATION_NOT_DISPATCHED",
-          "Page.navigate was not dispatched",
+          "Navigation was not dispatched",
           {
             actionDispatched: false,
             retry: "safe-to-recheck",
@@ -3660,17 +4803,38 @@ export class MoneyHand extends EventEmitter {
 
       let navigation;
       try {
-        navigation = directCdpValue(terminal, "Page.navigate", {
-          code: "NAVIGATION_REQUEST_FAILED",
-          label: "Task page navigation",
-        });
+        if (ownershipMarker) {
+          const value = directHandValue(terminal, {
+            code: "NAVIGATION_REQUEST_FAILED",
+            label: "Task ownership-marker navigation",
+          });
+          if (value.method !== "tabs.update"
+            || value.result?.id !== plan.tabId
+            || value.result.windowId !== this.taskWindows.get(space.id)?.windowId) {
+            throw new MoneyHandError(
+              "INVALID_NAVIGATION_RESULT",
+              "tabs.update returned a different task tab or window",
+            );
+          }
+          navigation = {
+            frameId: null,
+            loaderId: null,
+            isDownload: false,
+            transport: "chrome.tabs.update",
+          };
+        } else {
+          navigation = directCdpValue(terminal, "Page.navigate", {
+            code: "NAVIGATION_REQUEST_FAILED",
+            label: "Task page navigation",
+          });
+        }
       } catch (error) {
         const actionDispatched = terminal?.ok === true;
         throw new MoneyHandError(
           actionDispatched ? "NAVIGATION_OUTCOME_UNKNOWN" : "NAVIGATION_NOT_DISPATCHED",
           actionDispatched
-            ? "Page.navigate completed without a valid navigation result"
-            : "Chrome rejected Page.navigate before navigation",
+            ? "Navigation completed without a valid navigation result"
+            : "Chrome rejected navigation before dispatch",
           {
             actionDispatched,
             retry: actionDispatched ? "inspect-before-retry" : "safe-to-recheck",
@@ -3678,9 +4842,11 @@ export class MoneyHand extends EventEmitter {
           },
         );
       }
-      if (typeof navigation.frameId !== "string" || navigation.frameId.length < 1
-        || navigation.frameId !== before.frameId
+      if ((!ownershipMarker && (typeof navigation.frameId !== "string"
+          || navigation.frameId.length < 1
+          || navigation.frameId !== before.frameId))
         || (navigation.loaderId !== undefined
+          && navigation.loaderId !== null
           && (typeof navigation.loaderId !== "string" || navigation.loaderId.length < 1))
         || (navigation.errorText !== undefined && typeof navigation.errorText !== "string")
         || (navigation.isDownload !== undefined && typeof navigation.isDownload !== "boolean")) {
@@ -3694,6 +4860,7 @@ export class MoneyHand extends EventEmitter {
         frameId: navigation.frameId,
         loaderId: navigation.loaderId ?? null,
         isDownload: navigation.isDownload === true,
+        ...(navigation.transport === undefined ? {} : { transport: navigation.transport }),
         errorText: typeof navigation.errorText === "string"
           ? navigation.errorText.slice(0, 2_048)
           : null,
@@ -3740,18 +4907,567 @@ export class MoneyHand extends EventEmitter {
           state: null,
           observations: 0,
           stablePolls: 0,
-          claim: "Page.navigate-command-acknowledged-only",
+          claim: ownershipMarker
+            ? "chrome.tabs.update-command-acknowledged-only"
+            : "Page.navigate-command-acknowledged-only",
         };
       }
       const waited = await this.#waitForTaskPageState(session, plan, input, {
         actionDispatched: true,
-        transition: {
-          frameId: navigation.frameId,
-          requestedUrl: plan.url,
-          before,
-        },
+        ...(ownershipMarker ? {} : {
+          transition: {
+            frameId: navigation.frameId,
+            requestedUrl: plan.url,
+            before,
+          },
+        }),
       });
       return { ...base, loaded: true, ...waited };
+    });
+  }
+
+  async navigateSemanticRef(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "navigateSemanticRef options");
+    const taskSpaceId = requiredTaskSpaceId(input.taskSpaceId ?? input.id);
+    const space = this.taskSpaces.assertAgentControl(taskSpaceId);
+    const resolved = this.resolveSemanticRef({
+      snapshotId: input.snapshotId,
+      ref: input.ref,
+    });
+    const tabId = taskSpaceTabId(space, input.tabId ?? resolved.tabId);
+    if (resolved.tabId !== tabId) {
+      throw new MoneyHandError(
+        "TASK_SPACE_TAB_MISMATCH",
+        "The semantic ref belongs to a different tab than the Task Space",
+      );
+    }
+    if (space.selector.instanceId !== resolved.sessionSelector.instanceId
+      || space.selector.bootId !== resolved.sessionSelector.bootId) {
+      throw new MoneyHandError(
+        "TASK_SPACE_SESSION_MISMATCH",
+        "The semantic ref belongs to a different Profile boot than the Task Space",
+      );
+    }
+    const url = semanticNavigationUrl(resolved);
+    const navigation = await this.navigateTaskTab({
+      taskSpaceId,
+      tabId,
+      url,
+      effect: "navigation",
+      ...(input.waitUntil === undefined ? {} : { waitUntil: input.waitUntil }),
+      ...(input.expectedUrl === undefined ? {} : { expectedUrl: input.expectedUrl }),
+      ...(input.urlMatch === undefined ? {} : { urlMatch: input.urlMatch }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
+      ...(input.stablePolls === undefined ? {} : { stablePolls: input.stablePolls }),
+      ...(input.connectTimeoutMs === undefined ? {} : { connectTimeoutMs: input.connectTimeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    return {
+      taskSpaceId,
+      tabId,
+      snapshotId: input.snapshotId,
+      ref: input.ref,
+      href: resolved.node.href ?? resolved.node.properties?.url,
+      url,
+      navigation,
+    };
+  }
+
+  async scrollTaskTab(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "scrollTaskTab options");
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const deltaX = taskScrollDelta(input.deltaX, 0, "deltaX");
+    const deltaY = taskScrollDelta(input.deltaY, 0, "deltaY");
+    if (deltaX === 0 && deltaY === 0) {
+      throw new MoneyHandError(
+        "INVALID_TASK_SCROLL",
+        "scrollTaskTab requires a non-zero deltaX or deltaY",
+      );
+    }
+    let x = taskScrollCoordinate(input.x, "x");
+    let y = taskScrollCoordinate(input.y, "y");
+    if ((x === undefined) !== (y === undefined)) {
+      throw new MoneyHandError(
+        "INVALID_TASK_SCROLL",
+        "x and y must be supplied together or omitted together",
+      );
+    }
+    const session = await this.#sessionFor({ ...input, selector: space.selector });
+    if (x === undefined) {
+      const metricsTerminal = await session.request({
+        method: "cdp.send",
+        params: {
+          target: { tabId },
+          method: "Page.getLayoutMetrics",
+          params: {},
+        },
+      }, requestOptions(input, this.peer.requestTimeoutMs));
+      const metrics = selectedMetrics(directCdpValue(
+        metricsTerminal,
+        "Page.getLayoutMetrics",
+        { code: "TASK_SCROLL_PREFLIGHT_FAILED", label: "Task scroll viewport read" },
+      ));
+      x = metrics.visual.clientWidth / 2;
+      y = metrics.visual.clientHeight / 2;
+    }
+    const request = {
+      method: "input.perform",
+      params: {
+        target: { tabId },
+        action: "scroll",
+        coordinateSpace: COORDINATE_SPACE,
+        x,
+        y,
+        deltaX,
+        deltaY,
+      },
+    };
+    this.#validateTaskSpaceRequest(space, request);
+    let terminal;
+    try {
+      terminal = await session.request(request, requestOptions(input, this.peer.requestTimeoutMs));
+    } catch (error) {
+      if (error instanceof MoneyHandUnknownOutcomeError || error?.code === "OUTCOME_UNKNOWN") {
+        throw new MoneyHandError(
+          "SCROLL_OUTCOME_UNKNOWN",
+          "The human-input scroll lost its terminal outcome; inspect the page before retrying",
+          {
+            actionDispatched: true,
+            retry: "inspect-before-retry",
+            cause: normalizedError(error, "OUTCOME_UNKNOWN"),
+          },
+        );
+      }
+      throw error;
+    }
+    const result = directHandValue(terminal, {
+      code: "TASK_SCROLL_FAILED",
+      label: "Task scroll",
+    });
+    if (result.ok !== true || result.action !== "scroll" || result.target?.tabId !== tabId) {
+      throw new MoneyHandError(
+        "INVALID_TASK_SCROLL_RESULT",
+        "input.perform did not confirm the exact task-tab scroll",
+        { actionDispatched: terminal?.ok === true, retry: "inspect-before-retry" },
+      );
+    }
+    return {
+      taskSpaceId: space.id,
+      tabId,
+      effect: "input",
+      actionDispatched: true,
+      coordinateSpace: COORDINATE_SPACE,
+      point: { x, y },
+      delta: { x: deltaX, y: deltaY },
+      handRequestId: terminal.id,
+    };
+  }
+
+  async inspectTaskBlocker(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "inspectTaskBlocker options");
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const session = await this.#sessionFor({ ...input, selector: space.selector });
+    const generatedOutput = input.outputPath === undefined;
+    const outputRoot = generatedOutput
+      ? tmpdir()
+      : (input.outputRoot === undefined ? dirname(input.outputPath) : input.outputRoot);
+    const outputPath = validateOutputPath(
+      generatedOutput
+        ? resolve(tmpdir(), `npc-moneyhand-visual-${Date.now()}-${randomUUID()}.png`)
+        : input.outputPath,
+      outputRoot,
+    );
+    const trigger = visualFallbackTrigger(input.operation, input.reason);
+
+    const inspect = async () => {
+      let waitingForInstruction = null;
+      let statusError;
+      try {
+        const statusTerminal = await session.request({
+          method: "system.status",
+          behavior: TASK_INTERNAL_BEHAVIOR,
+          params: {},
+        }, requestOptions(input, this.peer.requestTimeoutMs));
+        const status = directHandValue(statusTerminal, {
+          code: "VISUAL_STATUS_FAILED",
+          label: "Visual fallback wait-state inspection",
+        });
+        waitingForInstruction = Array.isArray(status.waiting)
+          ? status.waiting.some((entry) => entry?.tabId === tabId && typeof entry?.waitId === "string")
+          : false;
+      } catch (error) {
+        if (input.signal?.aborted || error?.code === "ABORTED") throw error;
+        statusError = normalizedError(error, "VISUAL_STATUS_FAILED");
+      }
+
+      let page = null;
+      let contextError;
+      try {
+        const contextTerminal = await session.request({
+          method: "observe.context",
+          behavior: TASK_INTERNAL_BEHAVIOR,
+          params: {
+            target: { tabId },
+            maxTextChars: 12_000,
+            maxElements: 80,
+          },
+        }, requestOptions(input, this.peer.requestTimeoutMs));
+        const context = directHandValue(contextTerminal, {
+          code: "VISUAL_CONTEXT_FAILED",
+          label: "Visual fallback text context",
+        });
+        const { target: _target, ...boundedPage } = context;
+        page = boundedPage;
+      } catch (error) {
+        if (input.signal?.aborted || error?.code === "ABORTED") throw error;
+        contextError = normalizedError(error, "VISUAL_CONTEXT_FAILED");
+      }
+
+      let screenshot;
+      try {
+        const screenshotTerminal = await session.request({
+          method: "observe.screenshot",
+          behavior: TASK_INTERNAL_BEHAVIOR,
+          params: {
+            target: { tabId },
+            format: "png",
+            fullPage: false,
+          },
+        }, requestOptions(input, this.peer.requestTimeoutMs));
+        const value = directHandValue(screenshotTerminal, {
+          code: "VISUAL_CAPTURE_FAILED",
+          label: "Visual fallback screenshot",
+        });
+        if (value.target?.tabId !== tabId
+          || value.mimeType !== "image/png"
+          || typeof value.data !== "string"
+          || value.data.length < 1) {
+          throw new MoneyHandError(
+            "INVALID_VISUAL_CAPTURE",
+            "Visual fallback did not return PNG data for the pinned task tab",
+          );
+        }
+        const imageBuffer = Buffer.from(value.data, "base64");
+        const dimensions = pngDimensions(imageBuffer);
+        await writeScreenshot(outputPath, imageBuffer);
+        screenshot = {
+          captured: true,
+          path: outputPath,
+          mimeType: "image/png",
+          width: dimensions.width,
+          height: dimensions.height,
+          bytes: imageBuffer.length,
+          sha256: createHash("sha256").update(imageBuffer).digest("hex"),
+          capturedAt: new Date().toISOString(),
+          localSensitive: true,
+        };
+      } catch (error) {
+        if (input.signal?.aborted || error?.code === "ABORTED") throw error;
+        screenshot = {
+          captured: false,
+          error: normalizedError(error, "VISUAL_CAPTURE_FAILED"),
+        };
+      }
+
+      return {
+        schema: "npc-moneyhand-visual-fallback/1",
+        taskSpaceId: space.id,
+        captured: screenshot.captured,
+        waitingForInstruction,
+        trigger,
+        page,
+        ...(statusError === undefined ? {} : { statusError }),
+        ...(contextError === undefined ? {} : { contextError }),
+        screenshot,
+        actionReplayed: false,
+        nextAction: waitingForInstruction === true
+          ? "inspect-screenshot-then-resolveTaskBlocker"
+          : "inspect-screenshot-and-current-page-before-next-action",
+      };
+    };
+    return input[TASK_CONCURRENT_VISUAL_OBSERVATION] === true
+      ? await inspect()
+      : await this.#withTaskPageLock(space, tabId, "inspectTaskBlocker", inspect);
+  }
+
+  async resolveTaskBlocker(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "resolveTaskBlocker options");
+    const action = input.action;
+    if (action !== "resume" && action !== "cancel") {
+      throw new MoneyHandError(
+        "INVALID_BLOCKER_ACTION",
+        "resolveTaskBlocker action must be 'resume' or 'cancel'",
+      );
+    }
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const session = await this.#sessionFor({ ...input, selector: space.selector });
+    const statusTerminal = await session.request({
+      method: "system.status",
+      behavior: TASK_INTERNAL_BEHAVIOR,
+      params: {},
+    }, requestOptions(input, this.peer.requestTimeoutMs));
+    const status = directHandValue(statusTerminal, {
+      code: "BLOCKER_STATUS_FAILED",
+      label: "Task blocker wait-state inspection",
+    });
+    const wait = Array.isArray(status.waiting)
+      ? status.waiting.find((entry) => entry?.tabId === tabId && typeof entry?.waitId === "string")
+      : undefined;
+    if (!wait) {
+      return {
+        taskSpaceId: space.id,
+        resolved: false,
+        action,
+        waitingForInstruction: false,
+      };
+    }
+    const terminal = await session.request({
+      method: "instruction.resolve",
+      params: { tabId, waitId: wait.waitId, action },
+    }, requestOptions(input, this.peer.requestTimeoutMs));
+    const value = directHandValue(terminal, {
+      code: "BLOCKER_RESOLUTION_FAILED",
+      label: "Task blocker resolution",
+    });
+    if (value.tabId !== tabId
+      || value.waitId !== wait.waitId
+      || value.action !== action
+      || value.waiting !== false) {
+      throw new MoneyHandError(
+        "INVALID_BLOCKER_RESOLUTION",
+        "instruction.resolve did not resolve the exact pinned task-tab wait",
+      );
+    }
+    return {
+      taskSpaceId: space.id,
+      resolved: true,
+      action,
+      waitingForInstruction: false,
+    };
+  }
+
+  async captureStableViewport(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "captureStableViewport options");
+    const captureInput = input.outputRoot === undefined && typeof input.outputPath === "string"
+      ? { ...input, outputRoot: dirname(input.outputPath) }
+      : input;
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const maxAttempts = boundedInteger(input.maxAttempts, 1, 5, 3, "maxAttempts");
+    const retryDelayMs = boundedInteger(input.retryDelayMs, 0, 5_000, 150, "retryDelayMs");
+    return await this.#withTaskPageLock(
+      space,
+      tabId,
+      "captureStableViewport",
+      async () => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          try {
+            const result = await this.captureViewportBundle({
+              ...captureInput,
+              tabId,
+              selector: space.selector,
+            });
+            if (result.bundle === undefined) {
+              let failure;
+              try {
+                directHandValue(result.terminal, {
+                  code: "VIEWPORT_CAPTURE_FAILED",
+                  label: "Stable viewport capture",
+                });
+              } catch (error) {
+                failure = error;
+              }
+              throw new MoneyHandError(
+                "VIEWPORT_CAPTURE_FAILED",
+                "The guarded viewport capture returned a failed terminal result",
+                {
+                  actionDispatched: viewportCaptureWasDispatched(result.terminal),
+                  retry: "safe-to-recheck",
+                  attempts: attempt,
+                  cause: normalizedError(failure, "VIEWPORT_CAPTURE_FAILED"),
+                },
+              );
+            }
+            return {
+              ...result,
+              taskSpaceId: space.id,
+              tabId,
+              attempts: attempt,
+              stable: true,
+            };
+          } catch (error) {
+            if (error?.code !== "STALE_VIEWPORT") throw error;
+            if (attempt === maxAttempts) {
+              throw new MoneyHandError(
+                "VIEWPORT_NOT_STABLE",
+                "The task page did not remain stable for one guarded screenshot",
+                {
+                  actionDispatched: false,
+                  retry: "safe-to-recheck",
+                  attempts: attempt,
+                  cause: normalizedError(error, "STALE_VIEWPORT"),
+                },
+              );
+            }
+            await taskRetryDelay(retryDelayMs, input.signal);
+          }
+        }
+        throw new MoneyHandError("VIEWPORT_NOT_STABLE", "Stable screenshot attempts were exhausted");
+      },
+    );
+  }
+
+  async captureFullPage(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "captureFullPage options");
+    const space = this.taskSpaces.assertAgentControl(input.taskSpaceId ?? input.id);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    const outputRoot = input.outputRoot === undefined && typeof input.outputPath === "string"
+      ? dirname(input.outputPath)
+      : input.outputRoot;
+    const outputPath = validateOutputPath(input.outputPath, outputRoot);
+    const maxAttempts = boundedInteger(input.maxAttempts, 1, 3, 2, "maxAttempts");
+    const retryDelayMs = boundedInteger(input.retryDelayMs, 0, 5_000, 150, "retryDelayMs");
+    const session = await this.#sessionFor({ ...input, selector: space.selector });
+    const guardRequest = {
+      method: "batch.run",
+      params: {
+        steps: [
+          {
+            method: "cdp.send",
+            params: { target: { tabId }, method: "Page.getFrameTree", params: {} },
+          },
+          {
+            method: "cdp.send",
+            params: { target: { tabId }, method: "Page.getLayoutMetrics", params: {} },
+          },
+        ],
+        continueOnError: false,
+      },
+    };
+    this.#validateTaskSpaceRequest(space, guardRequest);
+    return await this.#withTaskPageLock(space, tabId, "captureFullPage", async () => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const beforeTerminal = await session.request(
+          guardRequest,
+          requestOptions(input, this.peer.requestTimeoutMs),
+        );
+        const before = directHandValue(beforeTerminal, {
+          code: "FULL_PAGE_PREFLIGHT_FAILED",
+          label: "Full-page capture preflight",
+        });
+        const beforeResults = before.results;
+        if (!Array.isArray(beforeResults) || beforeResults.length !== 2) {
+          throw new MoneyHandError(
+            "INVALID_FULL_PAGE_CAPTURE",
+            "Full-page preflight did not return two guarded results",
+          );
+        }
+        const beforeFrameTree = cdpBatchValue(beforeResults, 0, "Page.getFrameTree").frameTree;
+        const beforeMetrics = selectedMetrics(cdpBatchValue(
+          beforeResults,
+          1,
+          "Page.getLayoutMetrics",
+        ));
+        const screenshotTerminal = await session.request({
+          method: "observe.screenshot",
+          params: {
+            target: { tabId },
+            format: "png",
+            fullPage: true,
+          },
+        }, requestOptions(input, this.peer.requestTimeoutMs));
+        const screenshot = directHandValue(screenshotTerminal, {
+          code: "FULL_PAGE_CAPTURE_FAILED",
+          label: "Full-page screenshot",
+        });
+        const afterTerminal = await session.request(
+          guardRequest,
+          requestOptions(input, this.peer.requestTimeoutMs),
+        );
+        const after = directHandValue(afterTerminal, {
+          code: "FULL_PAGE_POSTFLIGHT_FAILED",
+          label: "Full-page capture postflight",
+        });
+        const afterResults = after.results;
+        if (!Array.isArray(afterResults) || afterResults.length !== 2) {
+          throw new MoneyHandError(
+            "INVALID_FULL_PAGE_CAPTURE",
+            "Full-page postflight did not return two guarded results",
+          );
+        }
+        const afterFrameTree = cdpBatchValue(afterResults, 0, "Page.getFrameTree").frameTree;
+        const afterMetrics = selectedMetrics(cdpBatchValue(
+          afterResults,
+          1,
+          "Page.getLayoutMetrics",
+        ));
+        try {
+          const frameGuard = assertStableViewport(
+            beforeFrameTree,
+            afterFrameTree,
+            beforeMetrics,
+            afterMetrics,
+          );
+          if (screenshot.target?.tabId !== tabId
+            || screenshot.mimeType !== "image/png"
+            || typeof screenshot.data !== "string"
+            || screenshot.data.length < 1) {
+            throw new MoneyHandError(
+              "INVALID_FULL_PAGE_CAPTURE",
+              "Full-page screenshot did not return PNG data for the pinned tab",
+            );
+          }
+          const imageBuffer = Buffer.from(screenshot.data, "base64");
+          const dimensions = pngDimensions(imageBuffer);
+          await writeScreenshot(outputPath, imageBuffer);
+          return {
+            taskSpaceId: space.id,
+            tabId,
+            attempts: attempt,
+            observationOnly: true,
+            coordinateMapping: false,
+            capturedAt: new Date().toISOString(),
+            frameGuard,
+            documentCss: {
+              width: afterMetrics.content.width,
+              height: afterMetrics.content.height,
+            },
+            image: {
+              width: dimensions.width,
+              height: dimensions.height,
+              bytes: imageBuffer.length,
+              sha256: createHash("sha256").update(imageBuffer).digest("hex"),
+            },
+            handRequestId: screenshotTerminal.id,
+          };
+        } catch (error) {
+          if (error?.code !== "STALE_VIEWPORT") throw error;
+          if (attempt === maxAttempts) {
+            throw new MoneyHandError(
+              "FULL_PAGE_NOT_STABLE",
+              "The task page did not remain stable for one full-page screenshot",
+              {
+                actionDispatched: false,
+                retry: "safe-to-recheck",
+                attempts: attempt,
+                cause: normalizedError(error, "STALE_VIEWPORT"),
+              },
+            );
+          }
+          await taskRetryDelay(retryDelayMs, input.signal);
+        }
+      }
+      throw new MoneyHandError("FULL_PAGE_NOT_STABLE", "Full-page screenshot attempts were exhausted");
     });
   }
 
@@ -3788,6 +5504,141 @@ export class MoneyHand extends EventEmitter {
   completeTaskSpace(options = {}) {
     const input = asObject(options, "completeTaskSpace options");
     return this.taskSpaces.complete(input.id, input);
+  }
+
+  async completeTaskContext(options = {}) {
+    this.#assertRunning();
+    const input = asObject(options, "completeTaskContext options");
+    const id = requiredTaskSpaceId(input.id ?? input.taskSpaceId);
+    const space = this.taskSpaces.assertAgentControl(id);
+    const windowCleanup = await this.#closeOwnedTaskWindow(id, input);
+    const resetBehavior = input.resetBehavior !== false;
+    let behaviorReset = { attempted: false, ok: true, value: null };
+    if (resetBehavior) {
+      behaviorReset = { attempted: true, ok: false, value: null };
+      try {
+        const session = await this.#sessionFor({
+          ...input,
+          selector: space.selector,
+          signal: undefined,
+        });
+        let value;
+        for (let attempt = 1; attempt <= TASK_WINDOW_READY_ATTEMPTS; attempt += 1) {
+          try {
+            const terminal = await session.request({
+              method: "behavior.reset",
+              behavior: TASK_INTERNAL_BEHAVIOR,
+              params: {},
+            }, requestOptions({ ...input, signal: undefined }, this.peer.requestTimeoutMs));
+            value = directHandValue(terminal, {
+              code: "TASK_BEHAVIOR_RESET_FAILED",
+              label: "Task behavior reset",
+            });
+            break;
+          } catch (error) {
+            // BUSY is an explicit before-dispatch rejection from the Extension's
+            // exclusive mutation queue. It is the only reset failure safe to
+            // replay; timeouts and all other unknown outcomes remain terminal.
+            if (error?.code !== "BUSY" || attempt === TASK_WINDOW_READY_ATTEMPTS) throw error;
+            await taskRetryDelay(TASK_WINDOW_READY_POLL_MS);
+          }
+        }
+        if (value.behavior?.mode !== "raw") {
+          throw new MoneyHandError(
+            "INVALID_TASK_BEHAVIOR_RESULT",
+            "The Extension did not confirm raw behavior after reset",
+          );
+        }
+        behaviorReset = { attempted: true, ok: true, value };
+      } catch (error) {
+        behaviorReset = {
+          attempted: true,
+          ok: false,
+          value: null,
+          error: normalizedError(error, "TASK_BEHAVIOR_RESET_FAILED"),
+        };
+      }
+    }
+    const taskSpace = windowCleanup.ok
+      ? this.taskSpaces.complete(id, {
+          keep: input.keep === undefined ? false : input.keep,
+          confirmation: input.confirmation,
+        })
+      : space;
+    return {
+      taskSpaceId: id,
+      taskSpace,
+      behaviorReset,
+      windowCleanup,
+      cleanupComplete: behaviorReset.ok && windowCleanup.ok,
+    };
+  }
+
+  ownedTaskWindowIds() {
+    return [...this.taskWindows.keys()];
+  }
+
+  async cleanupOwnedTaskWindows(options = {}) {
+    const input = asObject(options, "cleanupOwnedTaskWindows options");
+    const requested = input.taskIds === undefined
+      ? [...this.taskWindows.keys()]
+      : input.taskIds;
+    if (!Array.isArray(requested)
+      || requested.some((id) => typeof id !== "string" || !COMMAND_ID_PATTERN.test(id))) {
+      throw new MoneyHandError(
+        "INVALID_COMMAND",
+        "cleanupOwnedTaskWindows taskIds must be an array of task identifiers",
+      );
+    }
+    const results = [];
+    for (const id of [...new Set(requested)]) {
+      if (!this.taskWindows.has(id)) continue;
+      const space = this.taskSpaces.list().find((candidate) => candidate.id === id);
+      if (space?.state === "active" && space.ownership === "agent") {
+        try {
+          const lifecycle = await this.completeTaskContext({
+            taskSpaceId: id,
+            keep: false,
+            resetBehavior: true,
+          });
+          results.push({
+            id,
+            ...lifecycle.windowCleanup,
+            ok: lifecycle.cleanupComplete,
+            cleanupComplete: lifecycle.cleanupComplete,
+            behaviorReset: lifecycle.behaviorReset,
+            windowCleanup: lifecycle.windowCleanup,
+          });
+          continue;
+        } catch (error) {
+          results.push({
+            id,
+            attempted: true,
+            ok: false,
+            error: normalizedError(error, "TASK_WINDOW_CLOSE_FAILED"),
+          });
+          continue;
+        }
+      }
+      if (space?.ownership === "user") {
+        results.push({
+          id,
+          attempted: false,
+          ok: false,
+          error: {
+            code: "USER_CONTROL_ACTIVE",
+            message: "The task window remains open while user control is active",
+          },
+        });
+        continue;
+      }
+      results.push({ id, ...(await this.#closeOwnedTaskWindow(id, input)) });
+    }
+    return {
+      ok: results.every((result) => result.ok),
+      attempted: results.length,
+      results,
+    };
   }
 
   registerSiteLearning(options = {}) {
@@ -3913,7 +5764,11 @@ export class MoneyHand extends EventEmitter {
       );
     }
     const value = input.input === undefined ? {} : asObject(input.input, "rateControl.input");
-    if (action === "wait") return await this.rateController.wait(value);
+    if (action === "wait") {
+      return await this.rateController.wait(value, {
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+    }
     return this.rateController[action](value);
   }
 
@@ -4321,7 +6176,7 @@ export class MoneyHand extends EventEmitter {
     if (input.effect === undefined) {
       throw new MoneyHandError(
         "SEMANTIC_EFFECT_REQUIRED",
-        "actSemanticRef requires an explicit non-read-only effect",
+        "actSemanticRef requires top-level effect alongside taskSpaceId, snapshotId, ref and action",
       );
     }
     const effect = normalizeTaskEffect(input.effect);
@@ -4695,7 +6550,9 @@ export class MoneyHand extends EventEmitter {
             : "SEMANTIC_TARGET_NOT_INTERACTABLE";
       throw new MoneyHandError(
         code,
-        `${label} is not safely interactable (${targetState.reason ?? "unknown"})`,
+        `${label} is not safely interactable (${targetState.reason ?? "unknown"}${
+          targetState.hitTag ? ` by <${targetState.hitTag}>` : ""
+        })`,
         { reason: targetState.reason, hitTag: targetState.hitTag ?? null },
       );
     }
@@ -5889,6 +7746,113 @@ function boundedConnectFailure(error, afterUserAction = false) {
   });
 }
 
+async function runConnectAcceptanceFlow(options = {}) {
+  const {
+    moneyhand,
+    signal,
+    onProgress,
+    acceptanceTaskPath = CONNECT_ACCEPTANCE_TASK_PATH,
+  } = options;
+  if (typeof moneyhand?.request !== "function") {
+    throw new MoneyHandError("INVALID_CONNECT_ACCEPTANCE", "connect acceptance requires a MoneyHand instance");
+  }
+  if (typeof acceptanceTaskPath !== "string" || acceptanceTaskPath.length < 1) {
+    throw new MoneyHandError("INVALID_CONNECT_ACCEPTANCE", "connect acceptance task path missing");
+  }
+  return await runMoneyHandTask({
+    moneyhand,
+    taskPath: acceptanceTaskPath,
+    args: {
+      taskId: `connect-acceptance-${randomUUID()}`,
+    },
+    signal,
+    timeoutMs: CONNECT_ACCEPTANCE_TIMEOUT_MS,
+    progressIntervalMs: 5_000,
+    visualSilenceMs: 10_000,
+    onProgress,
+  });
+}
+
+function connectAcceptanceResult(value = {}) {
+  const acceptance = value?.outcome ?? {};
+  const checks = Array.isArray(acceptance.checks)
+    ? acceptance.checks.map((check) => ({
+        name: typeof check?.name === "string" ? check.name.slice(0, 128) : "unknown",
+        status: check?.status === "passed" ? "passed" : "failed",
+        ...(check?.error === undefined ? {} : { error: normalizedError(check.error, "CONNECT_ACCEPTANCE_FAILED") }),
+      }))
+    : [];
+  const passed = checks.filter((check) => check.status === "passed").length;
+  const cleanup = {
+    cleanupComplete: value?.lifecycle?.cleanupComplete === true,
+    windowClosed: value?.lifecycle?.windowClosed === true,
+    behaviorReset: value?.lifecycle?.behaviorReset === "raw" ? "raw" : null,
+  };
+  return {
+    schema: "npc-moneyhand-connect-acceptance/1",
+    status: acceptance.status === "complete" && passed === checks.length && checks.length > 0
+      && cleanup.cleanupComplete
+      ? "passed"
+      : "failed",
+    passed,
+    total: checks.length,
+    checks,
+    cleanup,
+    ...(acceptance.reason === undefined || acceptance.reason === null
+      ? {}
+      : { reason: String(acceptance.reason).slice(0, 128) }),
+    ...(acceptance.error === undefined
+      ? {}
+      : { error: normalizedError(acceptance.error, "CONNECT_ACCEPTANCE_FAILED") }),
+  };
+}
+
+function skippedConnectAcceptance() {
+  return {
+    schema: "npc-moneyhand-connect-acceptance/1",
+    status: "not_run",
+    reason: "isolated-test-port",
+    passed: 0,
+    total: 0,
+    checks: [],
+    cleanup: { cleanupComplete: true, windowClosed: true, behaviorReset: "raw" },
+  };
+}
+
+function failedConnectAcceptance(error) {
+  return {
+    schema: "npc-moneyhand-connect-acceptance/1",
+    status: "failed",
+    passed: 0,
+    total: 0,
+    checks: [],
+    cleanup: { cleanupComplete: false, windowClosed: false, behaviorReset: null },
+    error: normalizedError(error, "CONNECT_ACCEPTANCE_FAILED"),
+  };
+}
+
+function acceptedConnectResult(acceptance) {
+  if (acceptance.status !== "passed" && acceptance.status !== "not_run") {
+    return connectResult({
+      status: "blocked",
+      code: "CONNECT_ACCEPTANCE_FAILED",
+      action: "stop",
+      nextAction: "report_and_stop",
+      transportConnected: true,
+      acceptance,
+      userMessage: `MoneyHand 已连接，但自动全功能验收未通过（${acceptance.passed}/${acceptance.total}）。测试窗口已尝试关闭，当前不进入任务状态。`,
+    });
+  }
+  return connectResult({
+    status: "connected",
+    nextAction: CONNECT_READY_NEXT_ACTION,
+    acceptance,
+    userMessage: acceptance.status === "passed"
+      ? `MoneyHand 已连接，自动全功能验收 ${acceptance.passed}/${acceptance.total} 通过；测试窗口已关闭，行为已重置为 raw。已准备好接收浏览器任务，请告诉我要做什么。`
+      : "MoneyHand 已在隔离测试端口连接，当前测试未运行浏览器验收。",
+  });
+}
+
 function parseCliOptions(argv) {
   const values = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -5913,6 +7877,22 @@ function parseCliOptions(argv) {
       values.connect = true;
       continue;
     }
+    if (flag === "--ensure") {
+      values.ensure = true;
+      continue;
+    }
+    if (flag === "--stop") {
+      values.stopController = true;
+      continue;
+    }
+    if (flag === CONTROLLER_SERVICE_FLAG) {
+      values.controllerService = true;
+      continue;
+    }
+    if (flag === "--internal-stop-controller") {
+      values.stopController = true;
+      continue;
+    }
     if (flag === "--after-user-action") {
       values.afterUserAction = true;
       continue;
@@ -5930,6 +7910,12 @@ function parseCliOptions(argv) {
       // Undocumented ephemeral listener support for isolated test/conformance harnesses only.
       case "--internal-test-port":
         values.port = Number(value);
+        break;
+      case "--internal-controller-port":
+        values.controllerPort = Number(value);
+        break;
+      case "--internal-controller-idle-ms":
+        values.controllerIdleMs = Number(value);
         break;
       case "--connect-timeout-ms":
         values.connectTimeoutMs = Number(value);
@@ -5951,6 +7937,12 @@ function parseCliOptions(argv) {
         break;
       case "--output-drain-timeout-ms":
         values.outputDrainTimeoutMs = Number(value);
+        break;
+      case "--task-timeout-ms":
+        values.taskTimeoutMs = Number(value);
+        break;
+      case "--internal-task-abort-grace-ms":
+        values.taskAbortGraceMs = Number(value);
         break;
       case "--task":
         values.taskPath = value;
@@ -5988,12 +7980,19 @@ function parseCliOptions(argv) {
         throw new MoneyHandError("INVALID_OPTION", `Unknown option '${flag}'`);
     }
   }
-  const oneShotModes = [values.once, values.taskPath, values.callMethod, values.connect]
+  const oneShotModes = [
+    values.once,
+    values.taskPath,
+    values.callMethod,
+    values.connect,
+    values.ensure,
+    values.stopController,
+  ]
     .filter(Boolean).length;
   if (oneShotModes > 1) {
     throw new MoneyHandError(
       "INVALID_OPTION",
-      "--once, --task, --call, and --connect are mutually exclusive",
+      "--once, --task, --call, --connect, --ensure, and --stop are mutually exclusive",
     );
   }
   if (values.afterUserAction && !values.connect) {
@@ -6007,6 +8006,9 @@ function parseCliOptions(argv) {
   }
   if (values.taskArgs !== undefined && !values.taskPath) {
     throw new MoneyHandError("INVALID_OPTION", "--args-json requires --task");
+  }
+  if (values.taskTimeoutMs !== undefined && !values.taskPath) {
+    throw new MoneyHandError("INVALID_OPTION", "--task-timeout-ms requires --task");
   }
   if (values.describe) {
     const incompatible = Object.keys(values).filter((key) => key !== "describe");
@@ -6038,6 +8040,266 @@ export async function describeMoneyHand() {
   });
 }
 
+async function automaticTaskVisualFallback(moneyhand, state, operation, options, reason, signal) {
+  const taskSpaceId = options?.taskSpaceId ?? options?.id ?? state.activeTaskSpaceId;
+  const trigger = visualFallbackTrigger(operation, reason);
+  if (typeof taskSpaceId !== "string" || typeof moneyhand.inspectTaskBlocker !== "function") {
+    return {
+      schema: "npc-moneyhand-visual-fallback/1",
+      captured: false,
+      trigger,
+      screenshot: { captured: false },
+      skipped: "no-pinned-task-page",
+      actionReplayed: false,
+    };
+  }
+  if (state.visualFallbacks >= MAX_AUTOMATIC_VISUAL_FALLBACKS) {
+    return {
+      schema: "npc-moneyhand-visual-fallback/1",
+      captured: false,
+      trigger,
+      screenshot: { captured: false },
+      skipped: "automatic-task-visual-limit",
+      limit: MAX_AUTOMATIC_VISUAL_FALLBACKS,
+      actionReplayed: false,
+    };
+  }
+  state.visualFallbacks += 1;
+  const remember = (value) => {
+    state.lastVisualAt = Date.now();
+    state.lastVisualFallback = value;
+    return value;
+  };
+  try {
+    return remember(await moneyhand.inspectTaskBlocker({
+      taskSpaceId,
+      operation,
+      reason: trigger,
+      ...(options?.[TASK_CONCURRENT_VISUAL_OBSERVATION] === true
+        ? { [TASK_CONCURRENT_VISUAL_OBSERVATION]: true, timeoutMs: 5_000 }
+        : {}),
+      ...(signal === undefined ? {} : { signal }),
+    }));
+  } catch (error) {
+    return remember({
+      schema: "npc-moneyhand-visual-fallback/1",
+      captured: false,
+      trigger,
+      screenshot: {
+        captured: false,
+        error: normalizedError(error, "VISUAL_FALLBACK_FAILED"),
+      },
+      actionReplayed: false,
+    });
+  }
+}
+
+function taskScopedMoneyHand(moneyhand, signal, state = {}) {
+  if (!signal) return moneyhand;
+  state.activeTaskSpaceId ??= undefined;
+  state.visualFallbacks ??= 0;
+  return new Proxy(moneyhand, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      const taskAware = property === "request"
+        || property === "completeTaskContext"
+        || TASK_SIGNAL_FIRST_ARGUMENT_METHODS.has(property);
+      if (!taskAware) return value.bind(target);
+      return (...originalArgs) => {
+        const args = [...originalArgs];
+        if (property === "request") {
+          const options = args[1] ?? {};
+          args[1] = {
+            ...options,
+            ...(options.signal === undefined ? { signal } : {}),
+          };
+        } else if (property !== "completeTaskContext") {
+          const options = args[0] ?? {};
+          args[0] = {
+            ...options,
+            ...(options.signal === undefined ? { signal } : {}),
+          };
+        }
+        const operation = String(property);
+        const callOptions = property === "request" ? args[1] : args[0];
+        return (async () => {
+          if (property === "completeTaskContext") {
+            await state.beginCleanup?.({ taskSpaceId: callOptions?.taskSpaceId });
+          }
+          await state.noteActivity?.({
+            operation,
+            operationState: "started",
+            taskSpaceId: callOptions?.taskSpaceId,
+          });
+          try {
+            const result = await value.apply(target, args);
+            if (property === "beginTaskContext" && typeof result?.taskSpaceId === "string") {
+              state.activeTaskSpaceId = result.taskSpaceId;
+            }
+            if (property === "inspectTaskBlocker" && result?.captured === true) {
+              state.lastVisualAt = Date.now();
+              state.lastVisualFallback = result;
+            }
+            await state.noteActivity?.({ operation, operationState: "completed" });
+            const reason = taskVisualResultReason(operation, result);
+            if (!reason) return result;
+            const visualFallback = await automaticTaskVisualFallback(
+              target,
+              state,
+              operation,
+              callOptions,
+              reason,
+              signal,
+            );
+            await state.emit?.({
+              state: "visual_fallback",
+              phase: "exception",
+              operation,
+              message: "MoneyHand captured the current page after a browser anomaly",
+              visualFallback,
+            });
+            return taskVisibleTerminal(result, visualFallback);
+          } catch (error) {
+            await state.noteActivity?.({ operation, operationState: "failed" });
+            if (!taskVisualErrorEligible(operation, error)) throw error;
+            const visualFallback = await automaticTaskVisualFallback(
+              target,
+              state,
+              operation,
+              callOptions,
+              normalizedError(error),
+              signal,
+            );
+            await state.emit?.({
+              state: "visual_fallback",
+              phase: "exception",
+              operation,
+              message: "MoneyHand captured the current page after a browser operation failed",
+              visualFallback,
+            });
+            throw attachTaskVisualFallback(error, visualFallback);
+          }
+        })();
+      };
+    },
+  });
+}
+
+function taskProgressDetails(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new MoneyHandError("INVALID_TASK_PROGRESS", "Task progress must be an object");
+  }
+  const allowed = new Set(["phase", "message", "current", "total", "checkpoint"]);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new MoneyHandError(
+      "INVALID_TASK_PROGRESS",
+      `Unknown task progress field '${unknown[0]}'`,
+    );
+  }
+  const output = {};
+  for (const [key, maximum] of [["phase", 64], ["message", 1_000], ["checkpoint", 256]]) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "string" || value[key].length < 1 || value[key].length > maximum) {
+      throw new MoneyHandError(
+        "INVALID_TASK_PROGRESS",
+        `Task progress ${key} must be a non-empty string no longer than ${maximum} characters`,
+      );
+    }
+    output[key] = value[key];
+  }
+  for (const key of ["current", "total"]) {
+    if (value[key] === undefined) continue;
+    if (!Number.isSafeInteger(value[key]) || value[key] < 0) {
+      throw new MoneyHandError(
+        "INVALID_TASK_PROGRESS",
+        `Task progress ${key} must be a non-negative safe integer`,
+      );
+    }
+    output[key] = value[key];
+  }
+  if (output.current !== undefined && output.total !== undefined && output.current > output.total) {
+    throw new MoneyHandError(
+      "INVALID_TASK_PROGRESS",
+      "Task progress current must not exceed total",
+    );
+  }
+  return output;
+}
+
+function taskWatchdogPolicy(input = {}) {
+  const requestedProgressIntervalMs = boundedInteger(
+    input.progressIntervalMs,
+    10,
+    MAX_TASK_PROGRESS_INTERVAL_MS,
+    DEFAULT_TASK_PROGRESS_INTERVAL_MS,
+    "taskProgressIntervalMs",
+  );
+  const requestedVisualSilenceMs = boundedInteger(
+    input.visualSilenceMs,
+    10,
+    MAX_TASK_VISUAL_SILENCE_MS,
+    DEFAULT_TASK_VISUAL_SILENCE_MS,
+    "taskVisualSilenceMs",
+  );
+  return Object.freeze({
+    progressIntervalMs: Math.min(
+      requestedProgressIntervalMs,
+      DEFAULT_TASK_PROGRESS_INTERVAL_MS,
+    ),
+    visualSilenceMs: Math.min(
+      requestedVisualSilenceMs,
+      DEFAULT_TASK_VISUAL_SILENCE_MS,
+    ),
+  });
+}
+
+function taskTerminalVisualReason(outcome, abortReason, silenceMs, visualSilenceMs) {
+  if (abortReason?.code === "TASK_PROGRESS_OUTPUT_FAILED") return undefined;
+  if (abortReason) {
+    return {
+      ...normalizedError(abortReason, "TASK_FAILED"),
+      actionDispatched: abortReason?.details?.actionDispatched ?? "task-dependent",
+      retry: abortReason?.details?.retry ?? "inspect-current-page-before-retry",
+    };
+  }
+  if (outcome?.ok === false) {
+    return {
+      ...normalizedError(outcome.error, "TASK_FAILED"),
+      actionDispatched: outcome.error?.details?.actionDispatched ?? "task-dependent",
+      retry: outcome.error?.details?.retry ?? "inspect-current-page-before-retry",
+    };
+  }
+  const value = outcome?.value;
+  const terminal = value?.outcome && typeof value.outcome === "object"
+    ? value.outcome
+    : value;
+  const status = typeof terminal?.status === "string" ? terminal.status : undefined;
+  if (["blocked", "failed", "incomplete", "needs_instruction", "outcome_unknown"].includes(status)) {
+    const reason = terminal?.error && typeof terminal.error === "object"
+      ? terminal.error
+      : {
+          code: typeof terminal?.reason === "string" ? terminal.reason : `TASK_${status.toUpperCase()}`,
+          message: `MoneyHand task returned ${status}`,
+        };
+    return {
+      ...normalizedError(reason, "TASK_INCOMPLETE"),
+      actionDispatched: reason?.details?.actionDispatched ?? "task-dependent",
+      retry: reason?.details?.retry ?? "inspect-current-page-before-next-action",
+    };
+  }
+  if (silenceMs >= visualSilenceMs) {
+    return {
+      code: "TASK_PROGRESS_SILENCE",
+      message: `No browser-task activity completed within ${visualSilenceMs}ms before task settlement`,
+      actionDispatched: "task-dependent",
+      retry: "do-not-replay-inspect-current-page",
+    };
+  }
+  return undefined;
+}
+
 export async function runMoneyHandTask(options = {}) {
   const input = asObject(options, "runMoneyHandTask options");
   const moneyhand = input.moneyhand;
@@ -6053,18 +8315,1201 @@ export async function runMoneyHandTask(options = {}) {
   } catch {
     throw new MoneyHandError("INVALID_TASK", "taskPath must identify an existing local module");
   }
-  const taskModule = await import(`${pathToFileURL(taskPath).href}?task=${randomUUID()}`);
-  if (typeof taskModule.run !== "function") {
+  const taskModuleUrl = `${pathToFileURL(taskPath).href}?task=${randomUUID()}`;
+  const timeoutMs = boundedInteger(
+    input.timeoutMs,
+    10,
+    MAX_TASK_TIMEOUT_MS,
+    DEFAULT_TASK_TIMEOUT_MS,
+    "taskTimeoutMs",
+  );
+  const abortGraceMs = boundedInteger(
+    input.abortGraceMs,
+    10,
+    MAX_TASK_ABORT_GRACE_MS,
+    DEFAULT_TASK_ABORT_GRACE_MS,
+    "taskAbortGraceMs",
+  );
+  const { progressIntervalMs, visualSilenceMs } = taskWatchdogPolicy(input);
+  const baselineTaskWindows = new Set(
+    typeof moneyhand.ownedTaskWindowIds === "function"
+      ? moneyhand.ownedTaskWindowIds()
+      : [],
+  );
+  const taskController = new AbortController();
+  const progressStartedAt = Date.now();
+  const progressState = {
+    activeTaskSpaceId: undefined,
+    visualFallbacks: 0,
+    lastActivityAt: progressStartedAt,
+    lastProgressAt: 0,
+    lastVisualAt: 0,
+    lastVisualFallback: undefined,
+    visualSilenceMs,
+    latestOperation: undefined,
+    latestOperationState: undefined,
+    sequence: 0,
+    taskSettled: false,
+    finished: false,
+    visualWatchdogEnabled: true,
+  };
+  let progressQueue = Promise.resolve();
+  const emitProgress = async (details = {}) => {
+    const now = Date.now();
+    const event = {
+      type: "event",
+      event: "moneyhand.task_progress",
+      schema: "npc-moneyhand-task-progress/1",
+      sequence: ++progressState.sequence,
+      state: details.state ?? "running",
+      phase: details.phase ?? "task",
+      elapsedMs: Math.max(0, now - progressStartedAt),
+      silenceMs: Math.max(0, now - progressState.lastActivityAt),
+      ...(details.operation === undefined ? {} : { operation: details.operation }),
+      ...(details.operationState === undefined ? {} : { operationState: details.operationState }),
+      ...(details.message === undefined ? {} : { message: details.message }),
+      ...(details.current === undefined ? {} : { current: details.current }),
+      ...(details.total === undefined ? {} : { total: details.total }),
+      ...(details.checkpoint === undefined ? {} : { checkpoint: details.checkpoint }),
+      ...(details.visualFallback === undefined ? {} : { visualFallback: details.visualFallback }),
+    };
+    progressState.lastProgressAt = now;
+    if (typeof input.onProgress !== "function") return event;
+    progressQueue = progressQueue.then(() => input.onProgress(event));
+    try {
+      await progressQueue;
+    } catch (error) {
+      const failure = new MoneyHandError(
+        "TASK_PROGRESS_OUTPUT_FAILED",
+        "MoneyHand could not return mandatory task progress",
+        { cause: normalizedError(error, "TASK_PROGRESS_OUTPUT_FAILED") },
+      );
+      taskController.abort(failure);
+      throw failure;
+    }
+    return event;
+  };
+  progressState.emit = emitProgress;
+  progressState.inspectRecoveredSilence = async ({ operation, taskSpaceId } = {}) => {
+    if (progressState.visualWatchdogEnabled !== true || progressState.taskSettled) return undefined;
+    const now = Date.now();
+    const silenceMs = Math.max(0, now - progressState.lastActivityAt);
+    const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
+      && now - progressState.lastVisualAt < visualSilenceMs;
+    if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return undefined;
+    if (progressState.recoveredSilenceVisualWork) {
+      return await progressState.recoveredSilenceVisualWork;
+    }
+    progressState.recoveredSilenceVisualWork = (async () => {
+      const visualFallback = await automaticTaskVisualFallback(
+        moneyhand,
+        progressState,
+        "task-recovered-silence",
+        {
+          taskSpaceId: taskSpaceId ?? progressState.activeTaskSpaceId,
+          [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+        },
+        {
+          code: "TASK_PROGRESS_SILENCE",
+          message: `The controller recovered after ${silenceMs}ms without browser-task activity`,
+          actionDispatched: "task-dependent",
+          retry: "do-not-replay-inspect-current-page",
+        },
+        undefined,
+      );
+      await emitProgress({
+        state: "visual_fallback",
+        phase: "recovery",
+        operation,
+        message: "MoneyHand captured the current page immediately after recovering from overdue task silence",
+        visualFallback,
+      });
+      return visualFallback;
+    })();
+    try {
+      return await progressState.recoveredSilenceVisualWork;
+    } finally {
+      progressState.recoveredSilenceVisualWork = undefined;
+    }
+  };
+  progressState.noteActivity = async ({ operation, operationState, force = false, taskSpaceId }) => {
+    await progressState.inspectRecoveredSilence({ operation, taskSpaceId });
+    const now = Date.now();
+    progressState.lastActivityAt = now;
+    progressState.latestOperation = operation;
+    progressState.latestOperationState = operationState;
+    if (force || now - progressState.lastProgressAt >= progressIntervalMs) {
+      await emitProgress({
+        state: "running",
+        phase: operation === "task-cleanup" ? "cleanup" : "browser",
+        operation,
+        operationState,
+        message: operation === "task-cleanup"
+          ? "MoneyHand is cleaning up the task-owned browser window"
+          : `MoneyHand browser operation ${operationState}`,
+      });
+    }
+  };
+  const reportProgress = async (value = {}) => {
+    const details = taskProgressDetails(value);
+    await progressState.inspectRecoveredSilence({ operation: "task-progress" });
+    progressState.lastActivityAt = Date.now();
+    return await emitProgress({
+      state: "running",
+      phase: details.phase ?? "task",
+      message: details.message ?? "MoneyHand task is making progress",
+      ...(details.current === undefined ? {} : { current: details.current }),
+      ...(details.total === undefined ? {} : { total: details.total }),
+      ...(details.checkpoint === undefined ? {} : { checkpoint: details.checkpoint }),
+    });
+  };
+  const timeoutError = new MoneyHandError(
+    "TASK_TIMEOUT",
+    `MoneyHand task exceeded its ${timeoutMs}ms execution budget`,
+    { timeoutMs, actionDispatched: "task-dependent", retry: "inspect-checkpoint-before-retry" },
+  );
+  let deadlineTimer;
+  let deadlineWork = Promise.resolve();
+  let removeAbortListener = () => {};
+  const aborted = new Promise((resolvePromise) => {
+    const onAbort = () => resolvePromise({
+      kind: "aborted",
+      reason: taskController.signal.reason instanceof Error
+        ? taskController.signal.reason
+        : new MoneyHandError("ABORTED", "MoneyHand task was aborted"),
+    });
+    taskController.signal.addEventListener("abort", onAbort, { once: true });
+    removeAbortListener = () => taskController.signal.removeEventListener("abort", onAbort);
+  });
+  const forwardAbort = () => taskController.abort(
+    input.signal?.reason instanceof Error
+      ? input.signal.reason
+      : new MoneyHandError("ABORTED", "MoneyHand task was aborted by its caller"),
+  );
+  if (input.signal?.aborted) forwardAbort();
+  else input.signal?.addEventListener("abort", forwardAbort, { once: true });
+  deadlineTimer = setTimeout(() => {
+    deadlineWork = (async () => {
+      if (progressState.taskSettled || taskController.signal.aborted) return;
+      const visualFallback = await automaticTaskVisualFallback(
+        moneyhand,
+        progressState,
+        "task-deadline",
+        {
+          taskSpaceId: progressState.activeTaskSpaceId,
+          [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+        },
+        timeoutError,
+        undefined,
+      );
+      timeoutError.details = { ...timeoutError.details, visualFallback };
+      await emitProgress({
+        state: "visual_fallback",
+        phase: "timeout",
+        operation: progressState.latestOperation,
+        operationState: progressState.latestOperationState,
+        message: "MoneyHand inspected the current page before aborting the timed-out task",
+        visualFallback,
+      });
+      if (!progressState.taskSettled && !taskController.signal.aborted) {
+        taskController.abort(timeoutError);
+      }
+    })().catch((error) => {
+      if (!taskController.signal.aborted) taskController.abort(error);
+    });
+  }, timeoutMs);
+  let progressTickQueue = Promise.resolve();
+  const tickProgress = async () => {
+    if (progressState.finished) return;
+    const now = Date.now();
+    if (now - progressState.lastProgressAt >= progressIntervalMs) {
+      await emitProgress({
+        state: "running",
+        phase: progressState.visualWatchdogEnabled ? "heartbeat" : "cleanup",
+        operation: progressState.latestOperation,
+        operationState: progressState.latestOperationState,
+        message: progressState.visualWatchdogEnabled
+          ? "MoneyHand task is still running"
+          : "MoneyHand is finishing task cleanup",
+      });
+    }
+    if (!progressState.visualWatchdogEnabled
+      || now - progressState.lastActivityAt < visualSilenceMs
+      || now - progressState.lastVisualAt < visualSilenceMs) {
+      return;
+    }
+    if (progressState.recoveredSilenceVisualWork) {
+      await progressState.recoveredSilenceVisualWork;
+      return;
+    }
+    progressState.lastVisualAt = now;
+    const visualFallback = await automaticTaskVisualFallback(
+      moneyhand,
+      progressState,
+      "task-silence-watchdog",
+      {
+        taskSpaceId: progressState.activeTaskSpaceId,
+        [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+      },
+      {
+        code: "TASK_PROGRESS_SILENCE",
+        message: `No browser-task activity completed within ${visualSilenceMs}ms`,
+        actionDispatched: "task-dependent",
+        retry: "do-not-replay-inspect-current-page",
+      },
+      taskController.signal,
+    );
+    await emitProgress({
+      state: "visual_fallback",
+      phase: "watchdog",
+      operation: progressState.latestOperation,
+      operationState: progressState.latestOperationState,
+      message: "MoneyHand captured the current page because task feedback was silent",
+      visualFallback,
+    });
+  };
+  const progressTimer = setInterval(() => {
+    progressTickQueue = progressTickQueue
+      .then(tickProgress)
+      .catch((error) => {
+        if (!taskController.signal.aborted) taskController.abort(error);
+      });
+  }, Math.max(10, Math.min(
+    progressIntervalMs,
+    visualSilenceMs,
+    MAX_TASK_WATCHDOG_POLL_MS,
+  )));
+  progressTimer.unref?.();
+  progressState.beginCleanup = async ({ taskSpaceId } = {}) => {
+    if (progressState.visualWatchdogEnabled !== true) return;
+    const pausedAt = Date.now();
+    const silenceMs = Math.max(0, pausedAt - progressState.lastActivityAt);
+    progressState.visualWatchdogEnabled = false;
+    clearInterval(progressTimer);
+    await progressTickQueue.catch(() => {});
+    await progressState.recoveredSilenceVisualWork?.catch(() => {});
+    const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
+      && Date.now() - progressState.lastVisualAt < visualSilenceMs;
+    if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return;
+    const visualFallback = await automaticTaskVisualFallback(
+      moneyhand,
+      progressState,
+      "task-pre-cleanup-silence",
+      {
+        taskSpaceId: taskSpaceId ?? progressState.activeTaskSpaceId,
+        [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+      },
+      {
+        code: "TASK_PROGRESS_SILENCE",
+        message: `No browser-task activity completed within ${visualSilenceMs}ms before cleanup`,
+        actionDispatched: "task-dependent",
+        retry: "do-not-replay-inspect-current-page",
+      },
+      undefined,
+    );
+    await emitProgress({
+      state: "visual_fallback",
+      phase: "pre-cleanup",
+      operation: "completeTaskContext",
+      operationState: "started",
+      message: "MoneyHand inspected the current page before task cleanup",
+      visualFallback,
+    });
+  };
+  const taskOutcome = Promise.resolve()
+    .then(async () => {
+      await emitProgress({
+        state: "started",
+        phase: "task",
+        message: "MoneyHand task started",
+      });
+      const taskModule = await import(taskModuleUrl);
+      if (typeof taskModule.run !== "function") {
+        throw new MoneyHandError(
+          "INVALID_TASK",
+          "MoneyHand task module must export async function run",
+        );
+      }
+      return await taskModule.run({
+        moneyhand: taskScopedMoneyHand(moneyhand, taskController.signal, progressState),
+        signal: taskController.signal,
+        args: input.args,
+        progress: reportProgress,
+      });
+    })
+    .then(
+      (value) => {
+        progressState.taskSettled = true;
+        return { kind: "settled", ok: true, value };
+      },
+      (error) => {
+        progressState.taskSettled = true;
+        return { kind: "settled", ok: false, error };
+      },
+    );
+  let outcome;
+  let abortReason;
+  let taskAcknowledgedAbort = true;
+  try {
+    outcome = await Promise.race([taskOutcome, aborted]);
+    if (outcome.kind === "aborted") {
+      abortReason = outcome.reason;
+      clearTimeout(deadlineTimer);
+      const abortGraceExpired = Symbol("task-abort-grace-expired");
+      let graceTimer;
+      try {
+        outcome = await Promise.race([
+          taskOutcome,
+          new Promise((resolvePromise) => {
+            graceTimer = setTimeout(() => resolvePromise(abortGraceExpired), abortGraceMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(graceTimer);
+      }
+      if (outcome === abortGraceExpired) {
+        taskAcknowledgedAbort = false;
+      }
+    }
+  } finally {
+    clearTimeout(deadlineTimer);
+    removeAbortListener();
+    input.signal?.removeEventListener("abort", forwardAbort);
+  }
+  await deadlineWork.catch(() => {});
+  const preliminaryTaskError = abortReason ?? (outcome?.ok === false ? outcome.error : undefined);
+  const terminalSilenceMs = Math.max(0, Date.now() - progressState.lastActivityAt);
+  const terminalVisualReason = taskTerminalVisualReason(
+    outcome,
+    abortReason,
+    terminalSilenceMs,
+    visualSilenceMs,
+  );
+  const returnedSuccessfulVisual = outcome?.ok === true && (
+    outcome.value?.visualFallback?.captured === true
+      || outcome.value?.outcome?.visualFallback?.captured === true
+  );
+  const recentSuccessfulVisual = returnedSuccessfulVisual || (
+    progressState.lastVisualFallback?.captured === true
+      && Date.now() - progressState.lastVisualAt < visualSilenceMs
+  );
+  if (terminalVisualReason && !recentSuccessfulVisual) {
+    const visualFallback = await automaticTaskVisualFallback(
+      moneyhand,
+      progressState,
+      "task-terminal",
+      {
+        taskSpaceId: progressState.activeTaskSpaceId,
+        [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+      },
+      terminalVisualReason,
+      undefined,
+    );
+    await emitProgress({
+      state: "visual_fallback",
+      phase: "terminal",
+      operation: progressState.latestOperation,
+      operationState: progressState.latestOperationState,
+      message: "MoneyHand inspected the current page before task cleanup",
+      visualFallback,
+    }).catch(() => {});
+    if (preliminaryTaskError && typeof preliminaryTaskError === "object"
+      && preliminaryTaskError.details?.visualFallback === undefined) {
+      preliminaryTaskError.details = {
+        ...(preliminaryTaskError.details ?? {}),
+        visualFallback,
+      };
+    } else if (outcome?.ok === true && outcome.value && typeof outcome.value === "object"
+      && !Array.isArray(outcome.value) && outcome.value.visualFallback === undefined) {
+      outcome.value = { ...outcome.value, visualFallback };
+    }
+  }
+  progressState.visualWatchdogEnabled = false;
+  await progressState.noteActivity({
+    operation: "task-cleanup",
+    operationState: "started",
+    force: true,
+  }).catch(() => {});
+  const taskIds = typeof moneyhand.ownedTaskWindowIds === "function"
+    ? moneyhand.ownedTaskWindowIds().filter((id) => !baselineTaskWindows.has(id))
+    : [];
+  let cleanup;
+  if (typeof moneyhand.cleanupOwnedTaskWindows !== "function") {
+    cleanup = { ok: true, attempted: 0, results: [] };
+  } else {
+    const cleanupGraceExpired = Symbol("task-cleanup-grace-expired");
+    let cleanupTimer;
+    const cleanupOutcome = Promise.resolve()
+      .then(() => moneyhand.cleanupOwnedTaskWindows({ taskIds }))
+      .then(
+        (value) => ({ ok: true, value }),
+        (error) => ({ ok: false, error }),
+      );
+    let boundedCleanup;
+    try {
+      boundedCleanup = await Promise.race([
+        cleanupOutcome,
+        new Promise((resolvePromise) => {
+          cleanupTimer = setTimeout(() => resolvePromise(cleanupGraceExpired), abortGraceMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(cleanupTimer);
+    }
+    if (boundedCleanup === cleanupGraceExpired) {
+      cleanup = {
+        ok: false,
+        attempted: taskIds.length,
+        results: [],
+        error: {
+          code: "TASK_WINDOW_CLEANUP_TIMEOUT",
+          message: `Task-owned window cleanup exceeded ${abortGraceMs}ms`,
+        },
+      };
+    } else if (boundedCleanup.ok) {
+      cleanup = boundedCleanup.value;
+    } else {
+      cleanup = {
+        ok: false,
+        attempted: taskIds.length,
+        results: [],
+        error: normalizedError(boundedCleanup.error, "TASK_WINDOW_CLEANUP_FAILED"),
+      };
+    }
+  }
+  if (!taskAcknowledgedAbort || !cleanup.ok) {
+    try {
+      await input.onUnresponsive?.({ reason: abortReason, cleanup, taskIds });
+    } catch (error) {
+      cleanup.onUnresponsiveError = normalizedError(error, "TASK_FAIL_CLOSED_FAILED");
+    }
+  }
+  const taskError = preliminaryTaskError;
+  progressState.finished = true;
+  clearInterval(progressTimer);
+  await progressTickQueue.catch(() => {});
+  if (taskError) {
+    if (taskError && typeof taskError === "object") {
+      taskError.details = {
+        ...(taskError.details ?? {}),
+        taskAcknowledgedAbort,
+        cleanupComplete: cleanup.ok,
+        controllerReusable: taskAcknowledgedAbort && cleanup.ok,
+        taskWindowCleanup: cleanup,
+      };
+    }
+    await emitProgress({
+      state: "failed",
+      phase: "complete",
+      message: "MoneyHand task failed after bounded cleanup",
+    }).catch(() => {});
+    throw taskError;
+  }
+  if (!cleanup.ok) {
+    await emitProgress({
+      state: "failed",
+      phase: "complete",
+      message: "MoneyHand task finished but cleanup was incomplete",
+    }).catch(() => {});
     throw new MoneyHandError(
-      "INVALID_TASK",
-      "MoneyHand task module must export async function run",
+      "TASK_WINDOW_CLEANUP_FAILED",
+      "The task finished but one task-owned browser window could not be safely closed",
+      { taskWindowCleanup: cleanup },
     );
   }
-  return await taskModule.run({
-    moneyhand,
-    signal: input.signal,
-    args: input.args,
+  await emitProgress({
+    state: "completed",
+    phase: "complete",
+    message: "MoneyHand task completed and cleanup succeeded",
+  }).catch(() => {});
+  return outcome?.value;
+}
+
+function cliMoneyHandOptions(cli = {}) {
+  const {
+    once: _once,
+    onceTimeoutMs: _onceTimeoutMs,
+    outputDrainTimeoutMs: _outputDrainTimeoutMs,
+    taskPath: _taskPath,
+    taskArgs: _taskArgs,
+    taskTimeoutMs: _taskTimeoutMs,
+    taskAbortGraceMs: _taskAbortGraceMs,
+    callMethod: _callMethod,
+    callParams: _callParams,
+    connect: _connect,
+    ensure: _ensure,
+    stopController: _stopController,
+    controllerService: _controllerService,
+    controllerPort: _controllerPort,
+    controllerIdleMs: _controllerIdleMs,
+    afterUserAction: _afterUserAction,
+    autoLaunchBrowser: _autoLaunchBrowser,
+    browserRoot: _browserRoot,
+    profileDirectory: _profileDirectory,
+    browserExecutable: _browserExecutable,
+    launchGraceMs: _launchGraceMs,
+    help: _help,
+    version: _version,
+    describe: _describe,
+    ...moneyhandCli
+  } = cli;
+  return {
+    host: "127.0.0.1",
+    port: DEFAULT_PORT,
+    pairingToken: HOST_PROCESS.env.NPC_MONEYHAND_PAIRING_TOKEN ?? "",
+    connectTimeoutMs: numericEnvironment(
+      "NPC_MONEYHAND_CONNECT_TIMEOUT_MS",
+      DEFAULT_CONNECT_TIMEOUT_MS,
+    ),
+    requestTimeoutMs: numericEnvironment(
+      "NPC_MONEYHAND_REQUEST_TIMEOUT_MS",
+      30_000,
+    ),
+    heartbeatMs: numericEnvironment("NPC_MONEYHAND_HEARTBEAT_MS", 20_000),
+    handshakeTimeoutMs: numericEnvironment(
+      "NPC_MONEYHAND_HANDSHAKE_TIMEOUT_MS",
+      4_000,
+    ),
+    maxInflight: numericEnvironment("NPC_MONEYHAND_MAX_INFLIGHT", 64),
+    ...moneyhandCli,
+  };
+}
+
+function resolvedTaskTimeoutMs(value) {
+  return boundedInteger(
+    value ?? numericEnvironment("NPC_MONEYHAND_TASK_TIMEOUT_MS", DEFAULT_TASK_TIMEOUT_MS),
+    10,
+    MAX_TASK_TIMEOUT_MS,
+    DEFAULT_TASK_TIMEOUT_MS,
+    "taskTimeoutMs",
+  );
+}
+
+function resolvedTaskAbortGraceMs(value) {
+  return boundedInteger(
+    value ?? DEFAULT_TASK_ABORT_GRACE_MS,
+    10,
+    MAX_TASK_ABORT_GRACE_MS,
+    DEFAULT_TASK_ABORT_GRACE_MS,
+    "taskAbortGraceMs",
+  );
+}
+
+function controllerSpawnArguments(cli) {
+  const argumentsList = [];
+  const valueOptions = [
+    ["port", "--internal-test-port"],
+    ["controllerIdleMs", "--internal-controller-idle-ms"],
+    ["connectTimeoutMs", "--connect-timeout-ms"],
+    ["requestTimeoutMs", "--request-timeout-ms"],
+    ["heartbeatMs", "--heartbeat-ms"],
+    ["handshakeTimeoutMs", "--handshake-timeout-ms"],
+    ["maxInflight", "--max-inflight"],
+    ["taskAbortGraceMs", "--internal-task-abort-grace-ms"],
+  ];
+  for (const [key, flag] of valueOptions) {
+    if (cli[key] !== undefined) argumentsList.push(flag, String(cli[key]));
+  }
+  if (cli.autoLaunchBrowser === false) argumentsList.push("--no-browser-launch");
+  return argumentsList;
+}
+
+async function ensureCliController(cli) {
+  return await ensureControllerService({
+    sourcePath: SOURCE_PATH,
+    port: cli.controllerPort ?? DEFAULT_CONTROLLER_PORT,
+    spawnArguments: controllerSpawnArguments(cli),
   });
+}
+
+async function connectControllerMoneyHand(moneyhand, request, signal) {
+  const connectTimeoutMs = request.connectTimeoutMs
+    ?? numericEnvironment("NPC_MONEYHAND_CONNECT_TIMEOUT_MS", DEFAULT_CONNECT_TIMEOUT_MS);
+  return request.autoLaunchBrowser === false
+    ? {
+        session: await moneyhand.wait({ timeoutMs: connectTimeoutMs, signal }),
+        launched: false,
+        browser: null,
+      }
+    : await ensureMoneyHandConnection({
+        moneyhand,
+        timeoutMs: connectTimeoutMs,
+        graceMs: boundedInteger(request.launchGraceMs, 0, 60_000, 1_000, "launchGraceMs"),
+        signal,
+        browserRoot: request.browserRoot,
+        profileDirectory: request.profileDirectory,
+        browserExecutable: request.browserExecutable,
+      });
+}
+
+function provisionalControllerBootstrapWindow(connection) {
+  const marker = connection.browser?.bootstrapMarker;
+  if (connection.launched !== true || typeof marker !== "string") return null;
+  return {
+    marker,
+    selector: {
+      profile: connection.session.profile,
+      instanceId: connection.session.instanceId,
+      bootId: connection.session.bootId,
+    },
+    provisional: true,
+  };
+}
+
+function exactControllerBootstrapTabs(windows, record) {
+  return windows.flatMap((window) => {
+    if (window?.type !== "normal"
+      || !Number.isInteger(window.id)
+      || (record.windowId !== undefined && window.id !== record.windowId)
+      || !Array.isArray(window.tabs)) {
+      return [];
+    }
+    return window.tabs
+      .filter((tab) => Number.isInteger(tab?.id)
+        && (record.tabId === undefined || tab.id === record.tabId)
+        && tab.windowId === window.id
+        && (tab.url === record.marker || tab.pendingUrl === record.marker))
+      .map((tab) => ({ window, tab }));
+  });
+}
+
+async function captureControllerBootstrapWindow(moneyhand, record, signal) {
+  if (!record) return null;
+  let lastWindows = [];
+  for (let attempt = 1; attempt <= TASK_WINDOW_READY_ATTEMPTS; attempt += 1) {
+    const terminal = await moneyhand.request({
+      method: "chrome.call",
+      params: { method: "windows.getAll", args: [{ populate: true }] },
+    }, { selector: record.selector, signal, connectTimeoutMs: 0 });
+    const value = directHandValue(terminal, {
+      code: "BOOTSTRAP_WINDOW_INSPECTION_FAILED",
+      label: "Controller bootstrap-tab inspection",
+    });
+    if (value.method !== "windows.getAll" || !Array.isArray(value.result)) {
+      throw new MoneyHandError(
+        "INVALID_BOOTSTRAP_WINDOW_RESULT",
+        "windows.getAll returned an invalid bootstrap-tab result",
+      );
+    }
+    lastWindows = value.result;
+    const matches = exactControllerBootstrapTabs(lastWindows, record);
+    if (matches.length === 1) {
+      return {
+        ...record,
+        windowId: matches[0].window.id,
+        tabId: matches[0].tab.id,
+        provisional: false,
+      };
+    }
+    if (matches.length > 1) {
+      throw new MoneyHandError(
+        "BOOTSTRAP_WINDOW_AMBIGUOUS",
+        "More than one browser tab matched the controller bootstrap marker",
+      );
+    }
+    if (attempt < TASK_WINDOW_READY_ATTEMPTS) {
+      await taskRetryDelay(TASK_WINDOW_READY_POLL_MS, signal);
+    }
+  }
+  throw new MoneyHandError(
+    "BOOTSTRAP_WINDOW_NOT_FOUND",
+    "The browser launched for MoneyHand did not expose its unique bootstrap tab",
+    { inspectedWindows: lastWindows.length },
+  );
+}
+
+async function captureControllerBootstrapWindowForCommand(
+  moneyhand,
+  record,
+  signal,
+  command,
+) {
+  try {
+    return await captureControllerBootstrapWindow(moneyhand, record, signal);
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error;
+    if (error?.code === "BOOTSTRAP_WINDOW_AMBIGUOUS") throw error;
+    // The Extension handshake proves connection readiness for connect, task, and call.
+    // Keep the unique marker as provisional cleanup ownership when the just-opened
+    // bootstrap tab is not readable yet; later cleanup still requires an exact match.
+    return record;
+  }
+}
+
+async function closeControllerBootstrapWindowOnce(moneyhand, record) {
+  if (!record) return { attempted: false, ok: true };
+  const terminal = await moneyhand.request({
+    method: "chrome.call",
+    params: { method: "windows.getAll", args: [{ populate: true }] },
+  }, { selector: record.selector, connectTimeoutMs: 0 });
+  const value = directHandValue(terminal, {
+    code: "BOOTSTRAP_WINDOW_INSPECTION_FAILED",
+    label: "Controller bootstrap-tab cleanup inspection",
+  });
+  if (value.method !== "windows.getAll" || !Array.isArray(value.result)) {
+    throw new MoneyHandError(
+      "INVALID_BOOTSTRAP_WINDOW_RESULT",
+      "windows.getAll returned an invalid bootstrap-tab cleanup result",
+    );
+  }
+  let owned;
+  if (record.windowId === undefined) {
+    const matches = exactControllerBootstrapTabs(value.result, record);
+    if (matches.length === 0) {
+      return { attempted: true, ok: true, alreadyClosed: true, provisional: true };
+    }
+    if (matches.length > 1) {
+      return {
+        attempted: true,
+        ok: false,
+        error: {
+          code: "BOOTSTRAP_WINDOW_AMBIGUOUS",
+          message: "More than one tab matched the provisional MoneyHand bootstrap marker; no tab was closed",
+        },
+      };
+    }
+    [owned] = matches;
+  } else {
+    const sameId = value.result.find((window) => window?.id === record.windowId);
+    if (!sameId) return { attempted: true, ok: true, alreadyClosed: true };
+    const sameTab = Array.isArray(sameId.tabs)
+      ? sameId.tabs.find((tab) => tab?.id === record.tabId)
+      : undefined;
+    if (!sameTab) return { attempted: true, ok: true, alreadyClosed: true };
+    [owned] = exactControllerBootstrapTabs([sameId], record);
+  }
+  if (!owned) {
+    return {
+      attempted: true,
+      ok: false,
+      error: {
+        code: "BOOTSTRAP_TAB_OWNERSHIP_CHANGED",
+        message: "The MoneyHand bootstrap tab changed; it was not closed",
+      },
+    };
+  }
+  const windowId = owned.window.id;
+  const tabId = owned.tab.id;
+  const removed = await moneyhand.request({
+    method: "chrome.call",
+    params: { method: "tabs.remove", args: [tabId] },
+  }, { selector: record.selector, connectTimeoutMs: 0 });
+  const removedValue = directHandValue(removed, {
+    code: "BOOTSTRAP_TAB_CLOSE_FAILED",
+    label: "Controller bootstrap-tab cleanup",
+  });
+  if (removedValue.method !== "tabs.remove" || removedValue.result !== null) {
+    throw new MoneyHandError(
+      "INVALID_BOOTSTRAP_WINDOW_RESULT",
+      "tabs.remove returned an invalid bootstrap-tab cleanup result",
+    );
+  }
+  return { attempted: true, ok: true, alreadyClosed: false, windowId, tabId };
+}
+
+async function closeControllerBootstrapWindow(moneyhand, record) {
+  let lastError;
+  for (let attempt = 1; attempt <= TASK_WINDOW_READY_ATTEMPTS; attempt += 1) {
+    try {
+      return await closeControllerBootstrapWindowOnce(moneyhand, record);
+    } catch (error) {
+      lastError = error;
+      // A just-finished task-window removal can still occupy the Extension's
+      // exclusive queue for a few event-loop turns after its terminal result is
+      // delivered. BUSY proves this cleanup was not dispatched, so a bounded
+      // settle-and-retry is safe and cannot replay tabs.remove.
+      if (error?.code !== "BUSY" || attempt === TASK_WINDOW_READY_ATTEMPTS) throw error;
+      await taskRetryDelay(TASK_WINDOW_READY_POLL_MS);
+    }
+  }
+  throw lastError;
+}
+
+async function boundedControllerStopStep(operation, timeoutMs) {
+  const timedOut = Symbol("controller-stop-timeout");
+  let timer;
+  const settled = Promise.resolve()
+    .then(operation)
+    .then(
+      (value) => ({ ok: true, value }),
+      (error) => ({ ok: false, error }),
+    );
+  try {
+    return await Promise.race([
+      settled,
+      new Promise((resolvePromise) => {
+        timer = setTimeout(() => resolvePromise(timedOut), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function stopControllerMoneyHand(moneyhand, bootstrapWindow, timeoutMs) {
+  const stepTimeoutMs = Math.max(10, Math.floor(timeoutMs / 2));
+  if (bootstrapWindow) {
+    await boundedControllerStopStep(
+      () => closeControllerBootstrapWindow(moneyhand, bootstrapWindow),
+      stepTimeoutMs,
+    );
+  }
+  await boundedControllerStopStep(
+    () => moneyhand.stop({ graceMs: 0 }),
+    stepTimeoutMs,
+  );
+}
+
+export const __test__ = Object.freeze({
+  provisionalControllerBootstrapWindow,
+  captureControllerBootstrapWindow,
+  captureControllerBootstrapWindowForCommand,
+  closeControllerBootstrapWindow,
+  stopControllerMoneyHand,
+  taskWatchdogPolicy,
+});
+
+function controllerCommandError(error, fallbackCode = "MONEYHAND_TASK_FAILED") {
+  const normalized = normalizedError(error, fallbackCode);
+  const failure = new MoneyHandError(normalized.code, normalized.message);
+  if (normalized.details !== undefined) failure.details = normalized.details;
+  return { failure, normalized };
+}
+
+async function runControllerServiceProcess(cli) {
+  const moneyhand = createMoneyHand(cliMoneyHandOptions(cli));
+  const taskAbortGraceMs = resolvedTaskAbortGraceMs(cli.taskAbortGraceMs);
+  let bootstrapWindow = null;
+  let started = false;
+  const ensureStarted = async () => {
+    if (!started) {
+      await moneyhand.start();
+      started = true;
+    }
+  };
+  let service;
+  try {
+    service = await startControllerService({
+      sourcePath: SOURCE_PATH,
+      port: cli.controllerPort ?? DEFAULT_CONTROLLER_PORT,
+      idleTimeoutMs: cli.controllerIdleMs ?? DEFAULT_CONTROLLER_IDLE_MS,
+      onStop: async () => stopControllerMoneyHand(
+        moneyhand,
+        bootstrapWindow,
+        taskAbortGraceMs,
+      ),
+      async handle(request, context) {
+        if (!["connect", "task", "call"].includes(request.command)) {
+          throw new MoneyHandError(
+            "INVALID_CONTROLLER_COMMAND",
+            `Unknown controller command '${request.command}'`,
+          );
+        }
+        try {
+          await ensureStarted();
+          const connection = await connectControllerMoneyHand(moneyhand, request, context.signal);
+          if (connection.launched === true) {
+            bootstrapWindow = provisionalControllerBootstrapWindow(connection);
+            bootstrapWindow = await captureControllerBootstrapWindowForCommand(
+              moneyhand,
+              bootstrapWindow,
+              context.signal,
+              request.command,
+            );
+          }
+          if (request.command === "connect") {
+            let acceptance;
+            if (cli.port !== undefined) {
+              acceptance = skippedConnectAcceptance();
+            } else {
+              try {
+                acceptance = connectAcceptanceResult(await runConnectAcceptanceFlow({
+                  moneyhand,
+                  signal: context.signal,
+                  onProgress: context.send,
+                }));
+              } catch (error) {
+                acceptance = failedConnectAcceptance(error);
+              }
+            }
+            await context.send({
+              type: "result",
+              id: "connect",
+              ok: true,
+              value: acceptedConnectResult(acceptance),
+            });
+            return;
+          }
+          await context.send({
+            type: "event",
+            event: "moneyhand.connected",
+            protocol: MONEYHAND_CONTROL_PROTOCOL,
+            session: connection.session,
+            launchedBrowser: connection.launched,
+            ...(connection.browser === null ? {} : {
+              browser: {
+                browserId: connection.browser.browserId,
+                profileDirectory: connection.browser.profileDirectory,
+                pid: connection.browser.pid,
+              },
+            }),
+          });
+          let value;
+          if (request.command === "task") {
+            let taskError;
+            try {
+              value = await runMoneyHandTask({
+                moneyhand,
+                taskPath: request.taskPath,
+                args: request.taskArgs,
+                signal: context.signal,
+                timeoutMs: request.taskTimeoutMs,
+                abortGraceMs: request.taskAbortGraceMs,
+                onProgress: context.send,
+                onUnresponsive: () => context.stopAfterCommand(),
+              });
+            } catch (error) {
+              taskError = error;
+            }
+            let bootstrapCleanup;
+            try {
+              bootstrapCleanup = await closeControllerBootstrapWindow(
+                moneyhand,
+                bootstrapWindow,
+              );
+            } catch (error) {
+              if (!taskError) throw error;
+              bootstrapCleanup = {
+                ok: false,
+                error: normalizedError(error, "BOOTSTRAP_WINDOW_CLEANUP_FAILED"),
+              };
+            }
+            if (bootstrapCleanup.ok) bootstrapWindow = null;
+            else {
+              await context.send({
+                type: "event",
+                event: "moneyhand.bootstrap_cleanup_incomplete",
+                protocol: MONEYHAND_CONTROL_PROTOCOL,
+                error: bootstrapCleanup.error,
+              });
+            }
+            if (taskError) {
+              if (!bootstrapCleanup.ok && typeof taskError === "object") {
+                taskError.details = {
+                  ...(taskError.details ?? {}),
+                  bootstrapWindowCleanup: bootstrapCleanup,
+                };
+              }
+              throw taskError;
+            }
+          } else {
+            let callError;
+            try {
+              value = await moneyhand.request({
+                  method: request.callMethod,
+                  params: request.callParams === undefined
+                    ? {}
+                    : asObject(request.callParams, "call params"),
+                }, {
+                  signal: context.signal,
+                  connectTimeoutMs: 0,
+                });
+            } catch (error) {
+              callError = error;
+            }
+            const bootstrapCleanup = await closeControllerBootstrapWindow(
+              moneyhand,
+              bootstrapWindow,
+            );
+            if (bootstrapCleanup.ok) bootstrapWindow = null;
+            else {
+              await context.send({
+                type: "event",
+                event: "moneyhand.bootstrap_cleanup_incomplete",
+                protocol: MONEYHAND_CONTROL_PROTOCOL,
+                error: bootstrapCleanup.error,
+              });
+            }
+            if (callError) throw callError;
+          }
+          await context.send({
+            type: "result",
+            id: request.command,
+            ok: true,
+            value: value ?? null,
+          });
+        } catch (error) {
+          if (request.command === "connect") {
+            await context.send({
+              type: "result",
+              id: "connect",
+              ok: true,
+              value: boundedConnectFailure(error, request.afterUserAction === true),
+            });
+            return;
+          }
+          const { failure, normalized } = controllerCommandError(error);
+          await context.send({
+            type: "result",
+            id: request.command,
+            ok: false,
+            error: normalized,
+          });
+          throw failure;
+        }
+      },
+    });
+  } catch (error) {
+    if (error?.code !== "EADDRINUSE") throw error;
+    await pingControllerService({
+      sourcePath: SOURCE_PATH,
+      port: cli.controllerPort ?? DEFAULT_CONTROLLER_PORT,
+      timeoutMs: 500,
+    });
+    return;
+  }
+  let serviceError;
+  service.on("error", (error) => {
+    serviceError ??= error;
+    service.stop().catch(() => {});
+  });
+  await once(service, "close");
+  if (serviceError) throw serviceError;
+}
+
+function controllerRequestFromCli(cli) {
+  const base = {
+    connectTimeoutMs: cli.connectTimeoutMs,
+    autoLaunchBrowser: cli.autoLaunchBrowser !== false,
+    browserRoot: cli.browserRoot,
+    profileDirectory: cli.profileDirectory,
+    browserExecutable: cli.browserExecutable,
+    launchGraceMs: cli.launchGraceMs,
+    afterUserAction: cli.afterUserAction === true,
+  };
+  if (cli.connect) return { command: "connect", ...base };
+  if (cli.taskPath) {
+    return {
+      command: "task",
+      taskPath: cli.taskPath,
+      taskArgs: cli.taskArgs,
+      taskTimeoutMs: resolvedTaskTimeoutMs(cli.taskTimeoutMs),
+      taskAbortGraceMs: resolvedTaskAbortGraceMs(cli.taskAbortGraceMs),
+      ...base,
+    };
+  }
+  return {
+    command: "call",
+    callMethod: cli.callMethod,
+    callParams: cli.callParams,
+    ...base,
+  };
+}
+
+async function runControllerCli(cli, cliOutput) {
+  const output = cliOutput.stream;
+  const resolvedOutputDrainTimeoutMs = cli.outputDrainTimeoutMs ?? numericEnvironment(
+    "NPC_MONEYHAND_OUTPUT_DRAIN_TIMEOUT_MS",
+    OUTPUT_DRAIN_TIMEOUT_MS,
+  );
+  if (cli.stopController) {
+    let response;
+    try {
+      response = await shutdownControllerService({
+        sourcePath: SOURCE_PATH,
+        port: cli.controllerPort ?? DEFAULT_CONTROLLER_PORT,
+        timeoutMs: (2 * MAX_TASK_ABORT_GRACE_MS) + DEFAULT_TASK_ABORT_GRACE_MS + 10_000,
+      });
+    } catch (error) {
+      if (!["ECONNREFUSED", "CONTROLLER_UNAVAILABLE"].includes(error?.code)) throw error;
+      response = {
+        ok: true,
+        messages: [{ type: "result", id: "shutdown", ok: true, value: { stopped: false } }],
+      };
+    }
+    for (const message of response.messages) {
+      await writeFatalLine(output, JSON.stringify(message));
+    }
+    await closeCliOutput(cliOutput, resolvedOutputDrainTimeoutMs);
+    return response.ok ? undefined : response.error;
+  }
+  const status = await ensureCliController(cli);
+  if (cli.ensure) {
+    await writeFatalLine(output, JSON.stringify({
+      type: "result",
+      id: "ensure",
+      ok: true,
+      value: status,
+    }));
+    await closeCliOutput(cliOutput, resolvedOutputDrainTimeoutMs);
+    return;
+  }
+  const controllerRequestTimeoutMs = cli.taskPath
+    ? resolvedTaskTimeoutMs(cli.taskTimeoutMs)
+      + (2 * resolvedTaskAbortGraceMs(cli.taskAbortGraceMs))
+      + 5_000
+    : MAX_TASK_TIMEOUT_MS;
+  let streamedMessages = Promise.resolve();
+  const monitorStartedAt = Date.now();
+  let lastControllerMessageAt = monitorStartedAt;
+  let lastAttachedMonitorAt = 0;
+  let taskTerminalSeen = false;
+  const enqueueMessage = (message) => {
+    streamedMessages = streamedMessages.then(() => (
+      writeFatalLine(output, JSON.stringify(message))
+    ));
+  };
+  const attachedMonitorTimer = cli.taskPath
+    ? setInterval(() => {
+        if (taskTerminalSeen) return;
+        const now = Date.now();
+        const silenceMs = Math.max(0, now - lastControllerMessageAt);
+        if (silenceMs < ATTACHED_TASK_MONITOR_INTERVAL_MS
+          || now - lastAttachedMonitorAt < ATTACHED_TASK_MONITOR_INTERVAL_MS) {
+          return;
+        }
+        lastAttachedMonitorAt = now;
+        enqueueMessage({
+          type: "event",
+          event: "moneyhand.task_monitor",
+          schema: "npc-moneyhand-task-monitor/1",
+          state: "waiting",
+          phase: "attached-client",
+          elapsedMs: Math.max(0, now - monitorStartedAt),
+          silenceMs,
+          message: "MoneyHand task command is still attached while controller progress is overdue",
+        });
+      }, MAX_TASK_WATCHDOG_POLL_MS)
+    : undefined;
+  attachedMonitorTimer?.unref?.();
+  let response;
+  try {
+    response = await requestControllerService({
+      sourcePath: SOURCE_PATH,
+      port: cli.controllerPort ?? DEFAULT_CONTROLLER_PORT,
+      request: controllerRequestFromCli(cli),
+      timeoutMs: controllerRequestTimeoutMs,
+      signal: cliOutput.failure,
+      onMessage(message) {
+        lastControllerMessageAt = Date.now();
+        if (message?.type === "result" && message.id === "task") taskTerminalSeen = true;
+        enqueueMessage(message);
+      },
+    });
+  } finally {
+    clearInterval(attachedMonitorTimer);
+    await streamedMessages;
+  }
+  if (!response.ok && response.messages.every((message) => message.ok !== false)) {
+    await writeFatalLine(output, JSON.stringify({
+      type: "result",
+      id: cli.taskPath ? "task" : cli.callMethod ? "call" : "connect",
+      ok: false,
+      error: response.error,
+    }));
+  }
+  await closeCliOutput(cliOutput, resolvedOutputDrainTimeoutMs);
+  return response.ok ? undefined : response.error;
 }
 
 async function main(cliOutput) {
@@ -6089,11 +9534,14 @@ async function main(cliOutput) {
       "  --handshake-timeout-ms <ms>",
       "  --max-inflight <1-256>",
       "  --output-drain-timeout-ms <ms>",
+      "  --ensure  Ensure the built-in local controller is running",
+      "  --stop  Gracefully stop only the built-in local controller",
       "  --connect  Connect and return one bounded npc-moneyhand-connect/1 result",
       "  --after-user-action  Allow the single user-confirmed connection retry",
       "  --call <extension-method>",
       "  --params-json <json>",
       "  --task <absolute-module.mjs>",
+      "  --task-timeout-ms <10-86400000>",
       "  --args-json <json>",
       "  --browser-root <absolute-user-data-root>",
       "  --profile-directory <name>",
@@ -6117,6 +9565,11 @@ async function main(cliOutput) {
     await closeCliOutput(cliOutput);
     return;
   }
+  const controllerMode = cli.ensure
+    || cli.stopController
+    || ((cli.connect || cli.taskPath || cli.callMethod)
+      && (cli.port === undefined || cli.controllerPort !== undefined));
+  if (controllerMode) return await runControllerCli(cli, cliOutput);
   const controller = new AbortController();
   const stopForSignal = () => controller.abort();
   const stopForOutputFailure = () => controller.abort(cliOutput.failure.reason);
@@ -6139,6 +9592,8 @@ async function main(cliOutput) {
     outputDrainTimeoutMs,
     taskPath,
     taskArgs,
+    taskTimeoutMs,
+    taskAbortGraceMs,
     callMethod,
     callParams,
     connect,
@@ -6152,26 +9607,7 @@ async function main(cliOutput) {
     version: _version,
     ...moneyhandCli
   } = cli;
-  const moneyhand = createMoneyHand({
-    host: "127.0.0.1",
-    port: DEFAULT_PORT,
-    pairingToken: HOST_PROCESS.env.NPC_MONEYHAND_PAIRING_TOKEN ?? "",
-    connectTimeoutMs: numericEnvironment(
-      "NPC_MONEYHAND_CONNECT_TIMEOUT_MS",
-      DEFAULT_CONNECT_TIMEOUT_MS,
-    ),
-    requestTimeoutMs: numericEnvironment(
-      "NPC_MONEYHAND_REQUEST_TIMEOUT_MS",
-      30_000,
-    ),
-    heartbeatMs: numericEnvironment("NPC_MONEYHAND_HEARTBEAT_MS", 20_000),
-    handshakeTimeoutMs: numericEnvironment(
-      "NPC_MONEYHAND_HANDSHAKE_TIMEOUT_MS",
-      4_000,
-    ),
-    maxInflight: numericEnvironment("NPC_MONEYHAND_MAX_INFLIGHT", 64),
-    ...moneyhandCli,
-  });
+  const moneyhand = createMoneyHand(cliMoneyHandOptions(moneyhandCli));
   const onAbort = () => HOST_PROCESS.stdin.pause();
   controller.signal.addEventListener("abort", onAbort, { once: true });
   const resolvedOutputDrainTimeoutMs = outputDrainTimeoutMs ?? numericEnvironment(
@@ -6220,15 +9656,27 @@ async function main(cliOutput) {
               browser: null,
             };
         if (connect) {
+          let acceptance;
+          if (cli.port !== undefined) {
+            acceptance = skippedConnectAcceptance();
+          } else {
+            try {
+              acceptance = connectAcceptanceResult(await runConnectAcceptanceFlow({
+                moneyhand,
+                signal: controller.signal,
+                onProgress: async (event) => {
+                  await writeFatalLine(output, JSON.stringify(event));
+                },
+              }));
+            } catch (error) {
+              acceptance = failedConnectAcceptance(error);
+            }
+          }
           await writeFatalLine(output, JSON.stringify({
             type: "result",
             id: "connect",
             ok: true,
-            value: connectResult({
-              status: "connected",
-              nextAction: "ask_user_for_task",
-              userMessage: "MoneyHand 已连接，可以开始使用。你希望我现在操作哪个网页、完成什么任务？如果目标页面已经打开，请切到那个页面。",
-            }),
+            value: acceptedConnectResult(acceptance),
           }));
         } else {
           await writeFatalLine(output, JSON.stringify({
@@ -6251,6 +9699,11 @@ async function main(cliOutput) {
                 taskPath,
                 args: taskArgs,
                 signal: controller.signal,
+                timeoutMs: resolvedTaskTimeoutMs(taskTimeoutMs),
+                abortGraceMs: resolvedTaskAbortGraceMs(taskAbortGraceMs),
+                onProgress: async (event) => {
+                  await writeFatalLine(output, JSON.stringify(event));
+                },
               })
             : await moneyhand.request({
                 method: callMethod,
@@ -6496,10 +9949,12 @@ const isOutputWorker = HOST_PROCESS?.env?.[OUTPUT_WORKER_ENV] === "1"
   && HOST_PROCESS.argv?.length === 3
   && HOST_PROCESS.argv[2] === OUTPUT_WORKER_FLAG;
 
+const isControllerService = HOST_PROCESS?.argv?.includes(CONTROLLER_SERVICE_FLAG) === true;
+
 export function runMoneyHandCli() {
   const cliOutput = createCliOutput();
   return main(cliOutput).then(
-    () => HOST_PROCESS.exit(0),
+    (failure) => HOST_PROCESS.exit(failure ? 1 : 0),
     async (error) => {
       HOST_PROCESS.stdin.destroy();
       const fatalError = normalizedError(error, "MONEYHAND_FATAL");
@@ -6524,6 +9979,11 @@ export function runMoneyHandCli() {
 
 if (isOutputWorker) {
   runOutputWorker();
+} else if (isControllerService) {
+  runControllerServiceProcess(parseCliOptions(HOST_PROCESS.argv.slice(2))).then(
+    () => HOST_PROCESS.exit(0),
+    () => HOST_PROCESS.exit(1),
+  );
 } else if (isMainModule()) {
   runMoneyHandCli();
 }

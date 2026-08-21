@@ -1,5 +1,11 @@
 # Browser workflows
 
+For a normal task, read only `task-runtime.md` first. Open this file when the task actually needs one
+of the advanced operations listed below. Begin with `beginTaskContext()`; it creates the
+dedicated task window on a local `about:blank` fragment marker and returns the pinned context without
+loading an external marker site. Do not enumerate debugger targets or guess a page/window identifier.
+The operations below are advanced building blocks under that context.
+
 Use this reference when choosing a data plane, navigating, resolving semantic controls, handling
 downloads/uploads/select/check actions, or converting screenshots to safe input coordinates.
 
@@ -12,6 +18,7 @@ downloads/uploads/select/check actions, or converting screenshots to safe input 
 - [Downloads and uploads](#downloads-and-uploads)
 - [Select and binary controls](#select-and-binary-controls)
 - [Viewport capture and coordinates](#viewport-capture-and-coordinates)
+- [Bounded page-health recovery](#bounded-page-health-recovery)
 
 ## Acquisition order and rate control
 
@@ -21,7 +28,9 @@ When the user leaves the method open, choose the lowest total elapsed-time eligi
 2. CDP network response JSON or a known read-only same-session replay.
 3. CDP Runtime/DOM batch extraction.
 4. Browser UI for lazy loading, pagination or state only exposed through interaction.
-5. Explicit screenshot after structured/text routes are insufficient.
+5. A deliberate screenshot after structured/text routes are insufficient. Separately, the task
+   runtime automatically captures the current viewport on visible-page anomalies or 15 seconds of
+   task silence; this is recovery evidence, not a competing data-acquisition plane.
 
 Technical visibility is not authorization. Do not export cookies/tokens, bypass challenges, replay a
 write request, or extend collection scope because CDP exposes it.
@@ -37,23 +46,38 @@ concurrency. Recover through consecutive clean small batches and never exceed th
 Prefer `navigateTaskTab()` to raw `Page.navigate + sleep`:
 
 ```json
-{"id":"nav-1","op":"navigateTaskTab","args":{"taskSpaceId":"research","tabId":42,"url":"https://example.test/orders","effect":"navigation","waitUntil":"load","expectedUrl":"https://example.test/orders","urlMatch":"origin+path"}}
+{"id":"nav-1","op":"navigateTaskTab","args":{"taskSpaceId":"research","tabId":42,"url":"https://example.test/orders","effect":"navigation","waitUntil":"domcontentloaded","expectedUrl":"https://example.test/orders","urlMatch":"origin+path"}}
 ```
 
-It pins the Task Space Profile/tab before input, dispatches one `Page.navigate`, and waits with fixed
-`Page.getFrameTree + document.readyState` reads. `commit` proves only a valid navigation result;
-`domcontentloaded`/`load` prove document readiness, not business success or data completeness.
+It pins the Task Space Profile/tab before input. From the unreadable local `about:blank` ownership
+marker, the first transition verifies the exact marker with `tabs.get` and dispatches one
+`tabs.update`; later transitions dispatch one `Page.navigate`. Both paths then wait with fixed
+`Page.getFrameTree + document.readyState` reads. The default is `domcontentloaded`, which accepts an
+interactive DOM without waiting for every image, media or third-party subresource. Request `load`
+only when the task actually requires `document.readyState === "complete"`; it may legitimately take
+longer or exhaust the bounded wait on dynamic pages. `commit` proves only a valid navigation result;
+none of these readiness levels proves business success or data completeness.
 
 Use `waitForTaskPage()` with `effect:"read-only"` for a transition already in progress. URL matching is
-declarative (`exact`, `prefix`, `includes`, `origin`, `origin+path`), not caller JavaScript. A navigation
-timeout/abort/read failure after dispatch is outcome unknown; inspect the page before deciding.
+declarative (`exact`, `prefix`, `includes`, `origin`, `origin+path`), not caller JavaScript. A transient
+unreadable page state is returned directly to MoneyHand's bounded retry loop rather than opening an
+Agent-instruction wait, and is retried without replaying navigation. This request-local control-plane
+override does not disable text-first Agent waits for genuinely unclear semantic/input actions. If
+an error reports `actionDispatched:true` (including `NAVIGATION_OUTCOME_UNKNOWN` or
+`NAVIGATION_WAIT_TIMEOUT`), the task runtime attaches current text plus a local viewport PNG. Inspect
+that evidence once and never issue the same navigation again without proof that it did not take
+effect. Consider a corrected retry only when the error explicitly reports `actionDispatched:false`.
+
+For scrolling, prefer `scrollTaskTab()`. It infers the pinned page and viewport center, then
+dispatches through `input.perform`; this is the normal path where human scroll pacing applies. Page
+JavaScript such as `window.scrollBy()` is not human input.
 
 ## Semantic snapshots and locators
 
 `captureSemanticSnapshot()` uses a bounded Accessibility tree by default and produces short-lived
 snapshot-local `@ref` values plus stable role/name locators. Request DOMSnapshot bounds/CSS only when
-needed. Include frames explicitly for OOPIF or nested frame work; respect discovery limits and frame
-guards.
+needed. Link nodes expose a bounded `href` when Accessibility or DOM evidence provides one. Include
+frames explicitly for OOPIF or nested frame work; respect discovery limits and frame guards.
 
 Use `waitForSemanticLocator()` with the exact Task Space selector. It pins the first Profile boot,
 waits for consecutive stable samples, continues through missing/not-ready states, and fails closed on
@@ -69,6 +93,28 @@ act ref path.
 `actSemanticRef()` supports click, download, hover, scroll, drag, upload, select, check, uncheck, type
 and key. Always supply Task Space, fresh snapshot/ref, explicit effect and a meaningful verification.
 
+```js
+const { snapshot } = await moneyhand.captureSemanticSnapshot({
+  tabId: task.tabId,
+  selector: task.selector,
+  maxNodes: 800,
+});
+const target = snapshot.nodes.find((node) => node.role === "link" && node.href);
+await moneyhand.actSemanticRef({
+  taskSpaceId: task.taskSpaceId,
+  snapshotId: snapshot.id,
+  ref: target.ref,
+  action: "click",
+  effect: "input",
+  verification: { kind: "url-changed" },
+});
+```
+
+The argument to `snapshotId` is the string `snapshot.id`, not the snapshot object. `action` must be a
+top-level string. `effect` and `verification` are top-level siblings, never fields inside `action`.
+For link navigation, prefer `navigateSemanticRef()` when `node.href` exists; it resolves relative
+URLs against the guarded captured page and avoids pointer occlusion.
+
 - Click/type/key re-resolve the backend node, viewport, frame guard, hit target, occlusion and enabled
   state immediately before input.
 - Scroll anchors one fresh ref and requires at least one explicit nonzero bounded delta.
@@ -80,7 +126,9 @@ and key. Always supply Task Space, fresh snapshot/ref, explicit effect and a mea
   action payload and verification; it is not required for dispatch.
 
 Any stale snapshot/ref, loader/frame drift, occlusion, ambiguity or identity mismatch requires a fresh
-observation. A verification failure after dispatch is not proof the action failed.
+observation. The task runtime automatically captures the current viewport for these failures.
+Occlusion errors include `details.hitTag`; inspect the attached image, then avoid force-clicking or
+guessing through an overlay. A verification failure after dispatch is not proof the action failed.
 
 ## Downloads and uploads
 
@@ -117,11 +165,42 @@ dispatch. If the caller supplied an optional token, a no-op still consumes that 
 MoneyHand input coordinates are top-level CSS viewport coordinates under
 `css-viewport-v1`. Do not pass screen, full-page, document or raw screenshot pixels directly.
 
-Use `captureViewportBundle()` only with an existing local task root and a new output path. It binds
-Profile boot, tab, loader/frame state, viewport/scroll/DPR/zoom and PNG dimensions, then returns an
-explicit image-to-CSS mapping. Treat the PNG as sensitive local task data and do not overwrite files.
+Use `captureStableViewport()` for normal task screenshots. It wraps
+`captureViewportBundle()` and retries only `STALE_VIEWPORT`, before any file is written, for at
+most three attempts by default. Pass a new absolute `.png` `outputPath`; the high-level helper infers
+`outputRoot` from the existing parent directory. If supplied, `outputRoot` must be an existing local
+task directory containing `outputPath`. Use the lower-level `captureViewportBundle()` only with both
+an explicit existing `outputRoot` and a new `outputPath`. It binds Profile boot, tab, loader/frame state,
+viewport/scroll/DPR/zoom and PNG dimensions, then returns an explicit image-to-CSS mapping. Treat the
+PNG as sensitive local task data and do not overwrite files.
+
+Stable success returns `{bundle, taskSpaceId, tabId, attempts, stable:true}`. Exhausted stale captures
+throw `VIEWPORT_NOT_STABLE`; any failed capture terminal immediately throws
+`VIEWPORT_CAPTURE_FAILED` with `actionDispatched:false` and writes no file. Do not infer success from
+the helper returning an object with a false stability flag: that shape is not a success result.
 
 Before visual input, verify the bundle is fresh and the same Profile/tab/loader/viewport remains.
 Map a bounded image point through the bundle, then use CDP Input. Capture again after navigation,
 scroll, resize, zoom, frame movement, Profile switch or unknown outcome. A full-page screenshot does
-not have this click contract and remains observation-only.
+not have this click contract and remains observation-only. Use `captureFullPage()` only after the
+task has expanded the desired content; it requests the whole document, checks page guards before and
+after, writes at most one new PNG, and rejects responses above the Extension's 4 MiB decoded limit.
+Success explicitly returns `observationOnly:true`, `coordinateMapping:false`, document/image metadata,
+and a SHA-256. Exhausted stale guards throw `FULL_PAGE_NOT_STABLE`; other capture-stage failures are
+not retried.
+
+## Bounded page-health recovery
+
+`beginTaskContext()` creates and verifies one dedicated task window, so a live WebSocket with an
+unreadable tab does not begin a task. If a later operation reports a page-read or navigation-preflight failure, call
+`probeTaskContext()` once:
+
+- `healthy:true`: inspect the current page and decide from observed state; do not replay an unknown
+  action automatically.
+- `healthy:false, stage:"page"`: checkpoint, complete the context, then use the fixed connection flow
+  once.
+- `healthy:false, stage:"session"`: the pinned Profile boot is gone; do not switch to another Profile
+  or account inside the same task.
+
+Platform-specific link filtering, ad/footer classification, expansion-label matching and resumable
+business checkpoints belong in the specialized Skill, not in this shared browser layer.

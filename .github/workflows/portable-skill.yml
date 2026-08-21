@@ -48,9 +48,20 @@ jobs:
           python-version: "3.12"
       - name: Build and conformance-test release artifacts
         run: npm run release:pack
+      - name: Build the current portable Skill package
+        run: npm run skill:pack:portable
       - name: Upload the complete unpacked release directory
         uses: actions/upload-artifact@v7
         with:
           name: npc-moneyhand-release
           path: artifacts/agent-release
+          if-no-files-found: error
+      - name: Upload the portable Skill ZIP and integrity evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: npc-moneyhand-portable-skill
+          path: |
+            artifacts/portable-skill/npc-moneyhand-portable-skill-*.zip
+            artifacts/portable-skill/portable-manifest.json
+            artifacts/portable-skill/SHA256SUMS.txt
           if-no-files-found: error

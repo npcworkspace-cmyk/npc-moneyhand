@@ -25,7 +25,13 @@ test("portable Agent guide declares one bounded connect baseline and its runtime
   assert.match(guide, /Never close or restart all browser processes/u);
   assert.match(guide, /follow only `nextAction`/u);
   assert.match(guide, /Only `value\.connected: true`/u);
-  assert.match(guide, /ask the user what browser task to perform/u);
+  assert.match(guide, /full browser acceptance[\s\S]*ready_for_tasks/u);
+  assert.match(guide, /Do not ask whether to run it, skip it, or add another test/u);
+  assert.match(guide, /Skill root[\s\S]*directly contains `SKILL\.md`/u);
+  assert.match(guide, /already contains a[\s\S]*concrete browser task[\s\S]*without asking/u);
+  assert.match(guide, /installation request covers steps 1 through 5 as one uninterrupted Agent turn/iu);
+  assert.match(guide, /Copying\/importing[\s\S]*alone is not success/u);
+  assert.match(guide, /Do not stop after step 1/u);
   assert.doesNotMatch(guide, /target\.list|--call|tabId/u);
 });
 

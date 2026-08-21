@@ -19,7 +19,8 @@ extension must never import, discover, or depend on a specialized Skill.
 
 MoneyHand owns:
 
-- one-command connection, automatic browser wake-up, one loopback listener, extension handshake, and controller shutdown;
+- one-command connection, automatic browser wake-up, one bundled localhost controller, extension
+  handshake, command serialization, and idle shutdown;
 - Profile, boot, tab, Task Space, request-ID, and unknown-outcome identity;
 - raw/human behavior, semantic snapshots, guarded browser actions, and behavior reset;
 - optional caller-owned approval records, effect labels, adaptive rate state, and explicit cooldown waits;
@@ -61,12 +62,14 @@ A specialized Skill must:
 - pilot before scale, checkpoint before cooldown, and stop on challenge or account-state change;
 - prove exact completion or return a bounded incomplete result with counts, reason, and checkpoint;
 - inspect real page/business state before retrying any `OUTCOME_UNKNOWN` operation;
-- preserve the base Skill's structured-data-first and screenshot-last acquisition order.
+- preserve the base Skill's structured-data-first successful path and its automatic visual fallback
+  for page anomalies or silent tasks; do not implement another screenshot/retry loop.
 
 A specialized Skill must not:
 
 - copy or fork the MoneyHand peer, WebSocket, protocol, controller, browser launcher, or extension code;
-- start a second listener, daemon, browser, remote-debugging endpoint, or hidden controller;
+- start a second listener, controller process, browser runtime, or remote-debugging endpoint; the
+  base Skill's bundled controller and task window are injected and reused;
 - hardcode an installation path, Profile alias, tab ID, `instanceId`, or `bootId` across machines/runs;
 - bypass unknown-outcome recovery, browser-session identity, or human-only browser boundaries;
 - treat human behavior as permission to evade CAPTCHA, challenges, account controls, or rate limits;
@@ -114,15 +117,34 @@ token. A specialized Skill may add its own authorization policy when its busines
 
 ## Controller integration
 
+Start from `assets/specialized-task.mjs`. Its high-level lifecycle deliberately hides focus lookup,
+browser identifiers, behavior setup/reset, and cleanup. Replace only the bounded domain workflow
+inside the `try` block.
+
+The preferred controller surface is:
+
+- `beginTaskContext()`: create one dedicated task window and its pinned Task Space; no tab discovery;
+- `probeTaskContext()`: classify a later session/page failure once without switching Profile;
+- `navigateTaskTab()`, `navigateSemanticRef()`, semantic actions, and `scrollTaskTab()`: perform normal browser work;
+- automatic `visualFallback`: consume the base runtime's anomaly/silence screenshot and never replay
+  the triggering action blindly;
+- `captureStableViewport()` or observation-only `captureFullPage()`: request deliberate screenshots
+  only when task evidence or output requires them;
+- `completeTaskContext()`: reset temporary behavior, close the exact owned window, and complete the
+  Task Space in `finally`.
+
 Prefer an injected ESM function for reusable domain logic:
 
 ```js
-export async function run({ moneyhand, signal, args }) {
-  // Validate domain scope before the first browser dispatch.
-  // Reuse moneyhand; do not start or stop it here.
-  return { complete: false, reason: "DOMAIN_WORKFLOW_NOT_IMPLEMENTED" };
+export async function run({ moneyhand, signal, args, progress }) {
+  await progress({ phase: "start", message: "Specialized workflow started" });
+  // Copy assets/specialized-task.mjs, then replace only its domain-workflow placeholder.
 }
 ```
+
+Use the lower-level `createTaskSpace` / `taskRequest` operations only when a specialized workflow
+needs a wire method that the high-level task runtime does not cover. Do not make raw target discovery
+the first step of a specialized task.
 
 Use JSONL when the host needs a process boundary. Use `--once` when it cannot keep interactive stdin.
 Use `--task <absolute-task.mjs>` for trusted local disposable logic. Resolve the base Skill through an
@@ -140,16 +162,18 @@ the task-owned controller.
 1. Resolve MoneyHand and use `--connect` or `ensureMoneyHandConnection()`.
 2. Validate `--describe`, protocols, required operations, and required wire methods offline.
 3. Validate domain scope and exact-count gates before the first browser dispatch.
-4. Reuse or start exactly one task-owned controller and wait for the intended current Profile.
+4. Reuse the injected bundled controller, select the intended current Profile once, and create the
+   dedicated task window.
 5. Create a Task Space and rate scope; run the smallest representative pilot.
 6. Execute bounded batches, obey decisions, report observations, and persist domain checkpoints.
 7. Stop globally on challenge, account change, repeated minimum-rate throttling, or unknown outcome.
-8. Reset temporary behavior, complete the Task Space, drain JSONL when used, and stop only if the
-   top-level wrapper owns the controller.
+8. Reset temporary behavior, close the exact task-owned window, complete the Task Space, and drain
+   JSONL when used. Only a custom in-process adapter stops its own controller instance.
 
-On disconnect after dispatch, preserve the page/Profile state and return `OUTCOME_UNKNOWN`; do not
-detach, remove the task tab, confirm, or replay automatically. If cleanup or `completeTaskSpace`
-fails, keep that lifecycle failure in the result instead of hiding it behind the domain outcome.
+On disconnect after dispatch, inspect and checkpoint within the same task when possible, then return
+`OUTCOME_UNKNOWN`; do not detach, remove, confirm, or replay automatically. The base lifecycle still
+closes the exact task-owned window in `finally`. If cleanup or `completeTaskSpace` fails, keep that
+lifecycle failure in the result instead of hiding it behind the domain outcome.
 
 ## Packaging boundary
 
@@ -178,7 +202,8 @@ Require all applicable checks before calling a specialized Skill portable or pro
 - 429/503, `Retry-After`, challenge, account change, and latency regression have bounded fixtures.
 - High-impact effects dispatch without a mandatory MoneyHand approval token.
 - Exact-scope mismatch fails before browser dispatch; partial output cannot be labeled complete.
-- Post-dispatch disconnect produces one unknown outcome and zero automatic retries or destructive cleanup.
+- Post-dispatch disconnect produces one unknown outcome and zero automatic action retries; the base
+  lifecycle still closes only its exact task-owned window.
 - Shutdown drains results and reaches `moneyhand.stopped`; injected mode leaves lifecycle to its owner.
 - A separate real-Profile acceptance verifies the visible workflow; offline fixtures do not prove it.
 - The final package contains no copied peer, extension, secrets, live checkpoints, or undeclared dependency.

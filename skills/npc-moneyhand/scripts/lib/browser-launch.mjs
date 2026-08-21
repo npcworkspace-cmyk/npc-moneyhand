@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -249,10 +250,12 @@ export async function ensureMoneyHandConnection({
     env,
     homeDir,
   });
+  const bootstrapMarker = `about:blank#npc-moneyhand-bootstrap=${randomUUID()}`;
   const processResult = launch({
     executable: resolvedExecutable,
     browserRoot: installation.browserRoot,
     profileDirectory: installation.profileDirectory,
+    url: bootstrapMarker,
   });
   const remaining = Math.max(1, timeoutMs - (Date.now() - startedAt));
   const session = await moneyhand.wait({ timeoutMs: remaining, signal });
@@ -265,6 +268,7 @@ export async function ensureMoneyHandConnection({
       profileDirectory: installation.profileDirectory,
       executable: resolvedExecutable,
       pid: processResult?.pid ?? null,
+      bootstrapMarker,
     },
   };
 }

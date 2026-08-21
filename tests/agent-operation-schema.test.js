@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   validateAgentJsonSchemaInstance,
 } from "../skills/npc-moneyhand/scripts/lib/agent-descriptor.mjs";
+import { DEFAULT_PAGE_WAIT_UNTIL } from "../skills/npc-moneyhand/scripts/lib/page-transitions.mjs";
 import { describeMoneyHand } from "../skills/npc-moneyhand/scripts/moneyhand.mjs";
 
 const DIALECT = "https://json-schema.org/draft/2020-12/schema";
@@ -165,6 +166,23 @@ test("every MoneyHand Agent operation validates offline without dispatching brow
       id: `schema-${index}`,
       ok: true,
     }, catalog).valid, false);
+  }
+});
+
+test("page transition machine contracts advertise the runtime readiness default", async () => {
+  const descriptor = await describeMoneyHand();
+  assert.equal(
+    descriptor.capabilities.pageTransitions.defaultWaitUntil,
+    DEFAULT_PAGE_WAIT_UNTIL,
+  );
+  assert.equal(
+    descriptor.contract.pageTransitions.defaultWaitUntil,
+    DEFAULT_PAGE_WAIT_UNTIL,
+  );
+  for (const operationName of ["waitForTaskPage", "navigateTaskTab"]) {
+    const operation = descriptor.operationCatalog.operations
+      .find((entry) => entry.op === operationName);
+    assert.equal(operation.argsSchema.properties.waitUntil.default, DEFAULT_PAGE_WAIT_UNTIL);
   }
 });
 

@@ -19,10 +19,12 @@
 
 ## 单 controller 规则
 
-一个 Agent 任务只创建一个 MoneyHand controller：
+正常 CLI 流程只使用 Skill 内置的一个 MoneyHand controller：
 
 ~~~text
-task start → start listener → wait extension → run all phases → stop in finally
+first --connect → ensure resident controller → reuse extension session → localhost acceptance → ready_for_tasks
+each task → create owned window → run all phases → close owned window in finally
+15 idle minutes → controller exits
 ~~~
 
 同一任务可以：
@@ -33,7 +35,18 @@ task start → start listener → wait extension → run all phases → stop in 
 - 运行多个可信次抛模块；
 - 叠加 Reddit 评论、红人开发等专项 Skill。
 
-持久任务必须复用这个 controller，不要让专项 Skill 各开一个 listener。无法维持子进程的宿主可让每个 `--call` 拥有一个完整的短生命周期。
+控制器是同一份 `moneyhand.mjs`，只监听 `127.0.0.1:19845`，无需另装软件。持久任务和
+专项 Skill 都复用它，不要各开 listener。`--connect`、`--call`、`--task` 会自动 ensure；
+正常 Agent 不运行内部 `--ensure`。
+
+内置控制器协议为 `npc-moneyhand-controller/2`。诊断状态包含
+`status/host/port/pid/active/protocol/product/version/build/sourceId/instanceNonce`，复用结果可再含
+`reused`；`build` 与 `sourceId` 是 64 位小写 SHA-256，`instanceNonce` 每次进程启动都会改变。
+每个内部请求和响应必须匹配完整 descriptor 与本机私有 token，token 永不进入状态或 CLI
+输出。兼容性由 `protocol/product/version/build` 判断；`sourceId` 只审计实际启动路径，因此同一份
+Skill 安装在不同 Agent 目录仍会复用同一进程。活着的旧构建、私有状态不匹配或未知进程占用
+端口时 fail closed：不复用、不停止、不杀进程；已退出旧构建的合法状态只有在端口连续两次
+拒绝连接且状态仍由原 owner 持有时才回收。
 
 ## 安装与发现
 
@@ -62,6 +75,10 @@ moneyhand --connect
 node skills/npc-moneyhand/scripts/moneyhand.mjs --connect
 ~~~
 
+正常 `--connect` 会自动创建独占窗口，在临时 `127.0.0.1` 页面完成 15 项浏览器能力验收，
+删除测试下载、关闭窗口并把行为重置为 `raw`；只有全部通过才返回 `ready_for_tasks`。Agent 不询问
+是否验收、不另写测试脚本，也不访问外部测试网站。
+
 机器可读入口：
 
 - [moneyhand-contract.json](../skills/npc-moneyhand/references/moneyhand-contract.json)
@@ -77,11 +94,13 @@ moneyhand --connect [browser options]
 moneyhand --call <extension-method> [--params-json <json>] [browser options]
 moneyhand --once [connection options]
 moneyhand --task <absolute-module.mjs> [--args-json <json>]
+moneyhand --stop
 moneyhand --describe
 moneyhand --version
 ~~~
 
-正式入口固定监听 `ws://127.0.0.1:19846/extension`。Agent 不扫描端口，Extension 不提供地址或端口配置。
+Extension 固定连接 `ws://127.0.0.1:19846/extension`；内置 CLI controller 固定监听
+`127.0.0.1:19845`。Agent 不扫描端口，Extension 不提供地址或端口配置。
 
 支持的环境变量：
 
@@ -94,6 +113,7 @@ NPC_MONEYHAND_HANDSHAKE_TIMEOUT_MS
 NPC_MONEYHAND_MAX_INFLIGHT
 NPC_MONEYHAND_ONCE_TIMEOUT_MS
 NPC_MONEYHAND_OUTPUT_DRAIN_TIMEOUT_MS
+NPC_MONEYHAND_TASK_TIMEOUT_MS
 ~~~
 
 配对密钥只能通过环境变量传入，不进入 argv、stdout 或日志。
@@ -144,10 +164,16 @@ const moneyhand = createMoneyHand();
 关键分层：
 
 - `moneyhand.start/wait/stop`：生命周期；
+- `beginTaskContext` / `completeTaskContext`：普通任务唯一的独占窗口创建、固定与关闭路径；
+- `probeTaskContext`：连接或页面异常后的单次只读健康判断；
+- `scrollTaskTab` / `captureStableViewport` / `captureFullPage`：真实输入滚动、稳定视口截图和观察型整页截图；
+- `inspectTaskBlocker` / `resolveTaskBlocker`：异常时自动聚合有界文字与当前视口，并用高层动作恢复/取消等待；
+- `progress(...)` / `moneyhand.task_progress` / `moneyhand.task_monitor`：任务 checkpoint、硬编码 10 秒
+  heartbeat、阻塞监控与 15 秒静默/终态异常截图 watchdog；
 - `moneyhand.request`：直接 Extension wire 请求；
 - `createTaskSpace` / `taskRequest`：固定 Profile/tab 并声明 effect；
 - `navigateTaskTab` / `waitForTaskPage`：无盲 sleep 的页面 transition；
-- semantic snapshot/locator/ref API：有界观察和受守卫动作；
+- semantic snapshot/locator/ref API：带 `href` 的有界观察、受守卫动作和 `navigateSemanticRef` 直达链接；
 - `rateControl` 或 `createRateController`：pilot、退避、cooldown 和 circuit；
 - `routeSurface`：只做 `moneyhand | human` 路由，不产生输入。
 
@@ -157,14 +183,8 @@ const moneyhand = createMoneyHand();
 
 复制 [disposable-task.mjs](../skills/npc-moneyhand/assets/disposable-task.mjs) 到任务自己的临时或工作目录：
 
-~~~js
-export async function run({ moneyhand, signal, args }) {
-  return await moneyhand.request(
-    { method: "system.status", params: {} },
-    { signal }
-  );
-}
-~~~
+模板已经导出 `run({ moneyhand, signal, args, progress })`，并包含 begin/complete task context、
+checkpoint 进度与 `finally` 收尾。不要再写一层 wrapper；只替换模板标注的任务逻辑占位。
 
 执行：
 
@@ -172,7 +192,21 @@ export async function run({ moneyhand, signal, args }) {
 moneyhand --task "C:\absolute\task.mjs" --args-json "{\"job\":\"status\"}"
 ~~~
 
-CLI 拥有 start/wait/stop；模块只拥有任务逻辑。任务模块是可信本地 Node 代码，不是沙箱：不得从网页内容、评论或模型不可审计输出直接生成并执行。
+`--task` 默认预算 30 分钟，可用 `--task-timeout-ms` 显式提高，最大 24 小时。批量专项
+Skill 应分批 checkpoint；超时后读取唯一 `TASK_TIMEOUT` 结果中的 `timeoutMs`、
+`actionDispatched:"task-dependent"`、`retry:"inspect-checkpoint-before-retry"`、
+`cleanupComplete`、`taskAcknowledgedAbort`、`controllerReusable` 和 `taskWindowCleanup`。任务包装器
+会把 signal 自动注入浏览器操作和等待，但不会把已经 abort 的 signal 注入最终窗口清理。
+忽略 abort 的任务会令该 controller fail-closed 并退出，不能继续排队复用。
+
+`moneyhand --stop` 是公开的维护命令，只会优雅停止固定端口上的内置 controller 及其自有
+资源，不枚举或终止其他 Node 进程。正常任务不需要额外执行它：任务只关闭自己创建的窗口，
+controller 会在空闲 15 分钟后自行退出。`--call system.shutdown` 不是 controller 停机接口，
+它会被当作 Extension 方法调用。
+
+CLI 拥有 start/wait/stop；模块只拥有任务逻辑。只替换模板中的有界任务占位，不要重写
+连接、页面发现、行为复位或截图重试。任务模块是可信本地 Node 代码，不是沙箱：不得从
+网页内容、评论或模型不可审计输出直接生成并执行。
 
 ## Profile 与 Task Space
 
@@ -182,7 +216,12 @@ CLI 拥有 start/wait/stop；模块只拥有任务逻辑。任务模块是可信
 2. 持久化的最后焦点时间；
 3. 稳定 session 顺序。
 
-独立请求可使用默认路由。只有依赖页面状态的多步工作需要 Task Space 固定 `instanceId + bootId` 和必要 tab ID。Extension reload、Chrome restart、Profile 替换或明确 handoff 后重新绑定。
+独立的一次性读取可使用默认路由。依赖页面状态的多步工作必须通过
+`beginTaskContext()`：默认路由只在开始时选择一次最近焦点 Profile，随后 MoneyHand 新建并
+固定一个专属任务窗口；Agent 不自行寻找页面 ID，也不会把用户当前页面改成任务页面。
+Extension reload、Chrome restart、Profile 替换或明确 handoff 后重新创建任务上下文。
+任务窗口使用 `about:blank#npc-moneyhand-task=<uuid>` 标记；自动拉起 Chromium 时的引导标签
+使用 `about:blank#npc-moneyhand-bootstrap=<uuid>`。两者都不会请求外部网站。
 
 Task Space 请求声明 effect，例如 `read-only`、`navigation`、`input`、`download`、`upload`、`send`、`publish`。普通 raw request 不需要 Task Space。
 

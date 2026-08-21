@@ -12,6 +12,7 @@ const MAX_PAGE_URL_CHARS = 16_384;
 
 export const PAGE_WAIT_UNTILS = Object.freeze(["commit", ...PAGE_WAIT_UNTIL_SET]);
 export const PAGE_URL_MATCH_MODES = Object.freeze([...PAGE_URL_MATCH_MODE_SET]);
+export const DEFAULT_PAGE_WAIT_UNTIL = "domcontentloaded";
 export const MAX_PAGE_WAIT_TIMEOUT_MS = 300_000;
 export const MAX_PAGE_WAIT_OBSERVATIONS = 512;
 export const READ_TASK_PAGE_STATE_EXPRESSION = "({ readyState: document.readyState })";
@@ -94,7 +95,7 @@ function normalizeExpectedUrl(input) {
 
 function normalizeWait(input, options = {}) {
   const value = object(input, options.label ?? "page transition");
-  const waitUntil = value.waitUntil ?? "load";
+  const waitUntil = value.waitUntil ?? DEFAULT_PAGE_WAIT_UNTIL;
   const allowed = options.allowCommit === true
     ? new Set(PAGE_WAIT_UNTILS)
     : PAGE_WAIT_UNTIL_SET;

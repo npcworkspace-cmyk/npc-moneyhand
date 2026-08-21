@@ -46,6 +46,7 @@ const AX_PROPERTIES = [
   "readonly",
   "required",
   "selected",
+  "url",
 ];
 
 function valueOf(value) {
@@ -183,6 +184,10 @@ function compactText(value, maximum = 500) {
     : "";
 }
 
+function compactHref(value) {
+  return typeof value === "string" ? value.trim().slice(0, 16_384) : "";
+}
+
 function shouldInclude(node, role, name, value, includeIgnored) {
   if (node?.ignored === true && !includeIgnored) return false;
   if (ACTIONABLE_ROLES.has(role) || CONTENT_ROLES.has(role)) return true;
@@ -194,6 +199,7 @@ function contentLine(node) {
   if (node.frame?.topLevel === false) parts.push(`frame=${JSON.stringify(node.frame.frameId)}`);
   if (node.name) parts.push(JSON.stringify(node.name));
   if (node.value) parts.push(`value=${JSON.stringify(node.value)}`);
+  if (node.href) parts.push(`href=${JSON.stringify(node.href)}`);
   for (const [name, value] of Object.entries(node.properties)) {
     parts.push(`${name}=${JSON.stringify(value)}`);
   }
@@ -240,6 +246,8 @@ function semanticCandidates(options = {}) {
     const record = backendNodeId === undefined ? undefined : records.get(backendNodeId);
     const locator = stableLocator(record, role, name, counts);
     if (locator && frame?.frameId) locator.frameId = frame.frameId;
+    const properties = axProperties(node);
+    const href = compactHref(record?.attributes.href || properties.url);
     const axNodeId = String(node.nodeId ?? "");
     const parentAxNodeId = node.parentId === undefined ? undefined : String(node.parentId);
     candidates.push({
@@ -250,7 +258,8 @@ function semanticCandidates(options = {}) {
       name,
       value,
       description: compactText(valueOf(node.description)),
-      properties: axProperties(node),
+      properties,
+      ...(href ? { href } : {}),
       actionable: ACTIONABLE_ROLES.has(role),
       locator,
       bounds: record?.bounds,

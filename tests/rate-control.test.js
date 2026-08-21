@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import {
   AdaptiveRateController,
@@ -140,6 +141,93 @@ test("human mode cannot bypass cooldown and wait uses only the injected sleeper"
   assert.equal(after.allowed, true);
   assert.equal(after.phase, "recovery");
   assert.equal(after.behaviorMode, "human");
+});
+
+test("rate-control wait aborts promptly even when an injected sleeper does not", async () => {
+  let sleepCalls = 0;
+  const controller = createRateController({
+    now: () => 50_000,
+    random: () => 0.5,
+    sleep: async () => {
+      sleepCalls += 1;
+      await new Promise(() => {});
+    },
+    jitterRatio: 0,
+    baseDelayMs: 750,
+  });
+  controller.observe({ scope: WORK, throttle: true });
+  const abortController = new AbortController();
+  const waiting = controller.wait(
+    { scope: WORK, mode: "raw" },
+    { signal: abortController.signal },
+  );
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
+  abortController.abort(new Error("task budget expired"));
+  await assert.rejects(
+    waiting,
+    (error) => error.code === "ABORTED"
+      && error.details.actionDispatched === false
+      && error.details.retry === "safe-to-recheck",
+  );
+  assert.equal(sleepCalls, 1);
+});
+
+test("rate-control wait rejects an already-aborted signal before planning or sleeping", async () => {
+  let sleepCalls = 0;
+  const controller = createRateController({
+    sleep: async () => { sleepCalls += 1; },
+  });
+  const abortController = new AbortController();
+  abortController.abort(new Error("task was already cancelled"));
+  await assert.rejects(
+    controller.wait(
+      { scope: WORK, mode: "raw" },
+      { signal: abortController.signal },
+    ),
+    hasCode("ABORTED"),
+  );
+  assert.equal(sleepCalls, 0);
+  assert.equal(controller.snapshot().scopes.length, 0);
+});
+
+test("the default rate-control sleeper clears its timer after abort", async () => {
+  const moduleUrl = new URL(
+    "../skills/npc-moneyhand/scripts/lib/rate-control.mjs",
+    import.meta.url,
+  ).href;
+  const script = [
+    `import { createRateController } from ${JSON.stringify(moduleUrl)};`,
+    `const scope = ${JSON.stringify(WORK)};`,
+    "const controller = createRateController({ baseDelayMs: 10_000, jitterRatio: 0 });",
+    "controller.observe({ scope, throttle: true });",
+    "const abortController = new AbortController();",
+    "const waiting = controller.wait({ scope }, { signal: abortController.signal });",
+    "setImmediate(() => abortController.abort());",
+    "try { await waiting; process.exitCode = 2; } catch (error) {",
+    "  if (error.code !== 'ABORTED') process.exitCode = 3;",
+    "}",
+  ].join("\n");
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", script], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const exit = new Promise((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      rejectPromise(new Error("rate-control child retained the aborted cooldown timer"));
+    }, 1_000);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      rejectPromise(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      resolvePromise({ code, signal });
+    });
+  });
+  assert.deepEqual(await exit, { code: 0, signal: null }, stderr);
 });
 
 test("explicit throttle, 503 and latency regression are independent observable signals", () => {
