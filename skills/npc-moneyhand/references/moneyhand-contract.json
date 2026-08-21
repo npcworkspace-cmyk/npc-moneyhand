@@ -17,6 +17,12 @@
     "command": "--connect",
     "resultSchema": "npc-moneyhand-connect/1",
     "successNextAction": "ready_for_tasks",
+    "successTaskRouting": {
+      "currentConversationHasTask": "continue_immediately_without_reconfirmation",
+      "noConcreteTask": "ask_user_for_task",
+      "stopAfterConnectWhenTaskExists": "invalid",
+      "taskModule": "copy_and_implement_never_run_packaged_template"
+    },
     "userRetryFlag": "--after-user-action",
     "maximumUserConfirmedRetries": 1,
     "runsBrowserOperation": true,
@@ -578,6 +584,49 @@
     "humanInputPath": "input.perform",
     "humanJavaScriptScroll": false,
     "semanticLinkNavigation": "fresh-ref-href-to-guarded-navigation",
+    "fixedEffects": {
+      "navigateTaskTab": "navigation",
+      "navigateSemanticRef": "navigation",
+      "scrollTaskTab": "input",
+      "conflict": "INVALID_TASK_EFFECT-before-dispatch"
+    },
+    "moduleIsolation": {
+      "runtime": "one-node-worker-per-task-execution",
+      "externalPackages": 0,
+      "surface": "async-moneyhand-methods-progress-json-args-abort-signal",
+      "synchronousSnapshots": [
+        "capabilities",
+        "status"
+      ],
+      "normalCompletion": "terminate-worker-after-result",
+      "unacknowledgedAbort": "terminate-worker-then-clean-exact-task-windows"
+    },
+    "durableExecution": {
+      "taskExecutionId": "task-uuid-v4",
+      "journal": "os-temp-user-private-build-bound-jsonl",
+      "writeOrder": "journal-before-client-delivery",
+      "clientDisconnect": "task-continues",
+      "statusFlags": [
+        "--task-last",
+        "--task-status",
+        "--task-follow"
+      ]
+    },
+    "idempotentEffects": {
+      "field": "effectId",
+      "scope": "one-task-execution",
+      "concurrentDuplicates": "join-first-promise",
+      "laterDuplicates": "reuse-first-result",
+      "conflictingFingerprint": "EFFECT_ID_CONFLICT-before-dispatch",
+      "unknownOutcomeReplay": false
+    },
+    "fixedRecovery": {
+      "maximumAttempts": 2,
+      "retryCondition": "whitelisted-transient-and-actionDispatched-false-and-same-page-probe-healthy",
+      "staleOrOccluded": "fresh-target-no-replay",
+      "dispatchedOrUnknown": "inspect-no-replay",
+      "sessionFailure": "terminal-fixed-connect-flow-once"
+    },
     "visualFallback": {
       "mode": "automatic-broad-page-anomaly",
       "operation": "inspectTaskBlocker",
@@ -590,7 +639,7 @@
         "browser-input-or-postcondition-failure",
         "task-progress-silence",
         "task-terminal-failure-timeout-or-incomplete",
-        "task-event-loop-recovery-after-silence",
+        "task-worker-recovery-after-silence",
         "other-task-page-operation-failure"
       ],
       "excluded": [
@@ -623,16 +672,52 @@
       "screenshotBeforeTaskTimeoutAbort": true,
       "screenshotBeforeCleanupOnTerminalAnomaly": true,
       "watchdogPausedAndDrainedBeforeTaskCleanup": true,
-      "screenshotActionReplay": false
+      "screenshotActionReplay": false,
+      "relay": {
+        "field": "relay",
+        "wakeAgent": true,
+        "audiences": [
+          "agent",
+          "both"
+        ],
+        "controllerDeadlineMaximumMs": 10000,
+        "userDeadlineMs": 30000
+      }
+    },
+    "automaticRateControl": {
+      "scope": "http-origin-plus-pinned-profile",
+      "highLevelTaskSpaceGate": true,
+      "plainRequestGate": false,
+      "humanBypass": false,
+      "events": "moneyhand.task_rate_control"
+    },
+    "evidence": {
+      "schema": "npc-moneyhand-task-evidence/1",
+      "artifact": "os-temp-user-private-json",
+      "terminalField": "taskEvidence"
+    },
+    "completionGate": {
+      "schema": "npc-moneyhand-task-completion-gate/1",
+      "terminalField": "completionGate",
+      "failureCode": "TASK_COMPLETION_GATE_FAILED",
+      "checks": [
+        "owned-window-cleanup",
+        "effect-outcomes-resolved",
+        "rate-circuit-closed",
+        "instruction-blockers-resolved",
+        "declared-requirements"
+      ]
     },
     "screenshotRetry": {
       "operation": "captureStableViewport",
+      "successPathField": "path",
       "transientCode": "STALE_VIEWPORT",
       "defaultMaximumAttempts": 3,
       "otherErrorsRetried": false
     },
     "fullPageCapture": {
       "operation": "captureFullPage",
+      "successPathField": "path",
       "observationOnly": true,
       "coordinateMapping": false,
       "maximumDecodedBytes": 4194304
@@ -694,9 +779,23 @@
     "taskModule": {
       "flag": "--task",
       "requiredExport": "run",
-      "signature": "run({ moneyhand, signal, args, progress })",
+      "signature": "run({ moneyhand, signal, args, progress, taskExecutionId })",
       "security": "trusted-local-code",
+      "isolation": "one-built-in-node-worker-per-task-no-external-dependency",
+      "mutableControllerInternalsExposed": false,
+      "unresponsiveResourceCleanup": "terminate-task-worker-before-task-window-cleanup",
       "resultId": "task",
+      "submittedEvent": "moneyhand.task_submitted",
+      "taskExecutionIdSchema": "task-uuid-v4",
+      "statusFlags": [
+        "--task-last",
+        "--task-status",
+        "--task-follow"
+      ],
+      "terminalEvidenceFields": [
+        "taskEvidence",
+        "completionGate"
+      ],
       "timeoutFlag": "--task-timeout-ms",
       "defaultTimeoutMs": 1800000,
       "maximumTimeoutMs": 86400000,
@@ -711,7 +810,8 @@
       "automaticVisualSilenceMs": 15000,
       "watchdogThresholdsCanOnlyTighten": true,
       "monitoringStartsBeforeModuleImport": true,
-      "watchdogPausedAndDrainedBeforeTaskCleanup": true
+      "watchdogPausedAndDrainedBeforeTaskCleanup": true,
+      "relayField": "relay"
     },
     "directCall": {
       "connectFlag": "--connect",
@@ -749,6 +849,8 @@
       "halfOpenSocketShutdown": "destroy-accepted-sockets-before-server-close-wait",
       "autoLaunchedBrowserCleanup": "close-unchanged-unique-bootstrap-tab-after-task",
       "bootstrapCaptureRace": "retain-unique-provisional-marker-after-handshake-exact-cleanup-only",
+      "taskClientDisconnect": "journal-and-continue-task-for-reattachment",
+      "nonTaskClientDisconnect": "abort-active-command",
       "idleExitMs": 900000,
       "publicStopFlag": "--stop",
       "publicStopScope": "this-authenticated-controller-instance-only"
@@ -1287,7 +1389,8 @@
       ],
       "state": "task-owned-agent-memory",
       "checkpoint": "opaque-caller-token-no-credentials",
-      "enforcement": "explicit-caller-scheduler",
+      "enforcement": "task-runtime-auto-gate-plus-explicit-specialized-scheduler",
+      "taskRuntimeImplicitGate": true,
       "implicitRequestGate": false,
       "humanBypassesRateControl": false,
       "actionDispatch": "strict-oneOf-by-action",

@@ -26,6 +26,8 @@
    不终止占用进程。多个 Profile Extension 可以连接 `19846`，任务由内置
    controller 串行接收并用 Task Space 固定。
 8. 页面外表面只支持 human takeover，不因操作系统不同而自动添加本地输入后端。
+9. `taskExecutionId` journal 与 controller runtime build 绑定。任务运行中不得覆盖 Skill 或切换
+   build；客户端断开时用同一 build 的 `--task-follow` 接回，不能用升级后的代码猜读或重放。
 
 ## 平台边界
 

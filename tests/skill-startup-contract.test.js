@@ -23,6 +23,9 @@ test("base Skill exposes one bounded startup path with mandatory automatic accep
     "Do not change into `scripts/` first",
     "current conversation already contains one concrete browser task",
     "Do not ask the user to repeat or reconfirm the same task",
+    "Ending the Agent turn after\n  connection in this case is a task failure",
+    "Never run `assets/disposable-task.mjs`",
+    "TASK_TEMPLATE_NOT_IMPLEMENTED",
   ]) {
     assert.ok(skill.includes(required), `missing startup rule: ${required}`);
   }
@@ -102,6 +105,10 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(runtime, /Never put `Runtime\.evaluate` directly in `request\.method`/u);
   assert.match(runtime, /--task "ABSOLUTE_PATH_TO_TASK_MODULE\.mjs"/u);
   assert.match(runtime, /Deduplicate by canonical identifier/u);
+  for (const text of [runtime, await readFile(SKILL_PATH, "utf8")]) {
+    assert.match(text, /path\/byte count proves transport only/u);
+    assert.match(text, /task-specific visible sentinel/u);
+  }
   assert.match(recovery, /supplies its `AbortSignal` automatically/u);
   assert.match(runtime, /timeoutMs: 30_000,[\s\S]*signal,/u);
 });

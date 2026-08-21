@@ -385,6 +385,52 @@ test("controller service serializes concurrent task commands", async (t) => {
   assert.deepEqual(order, ["start:a", "end:a", "start:b", "end:b"]);
 });
 
+test("controller task survives a lost client and discards only that client's later delivery", async (t) => {
+  const port = await unusedPort();
+  let releaseTask;
+  let markStarted;
+  let markFinished;
+  let signalAborted;
+  let delivered;
+  const taskStarted = new Promise((resolvePromise) => { markStarted = resolvePromise; });
+  const taskRelease = new Promise((resolvePromise) => { releaseTask = resolvePromise; });
+  const taskFinished = new Promise((resolvePromise) => { markFinished = resolvePromise; });
+  const service = await startControllerService({
+    port,
+    idleTimeoutMs: 5_000,
+    async handle(request, context) {
+      if (request.command === "quick") {
+        await context.send({ type: "result", id: "quick", ok: true });
+        return;
+      }
+      assert.equal(request.command, "task");
+      markStarted();
+      await taskRelease;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      signalAborted = context.signal.aborted;
+      delivered = await context.send({ type: "result", id: "task", ok: true });
+      markFinished();
+    },
+  });
+  t.after(() => service.stop());
+
+  const controller = new AbortController();
+  const request = serviceRequest(service, {
+    request: { command: "task" },
+    signal: controller.signal,
+  });
+  await taskStarted;
+  controller.abort(new Error("Agent client disappeared"));
+  await assert.rejects(request, /Agent client disappeared/u);
+  releaseTask();
+  await taskFinished;
+
+  assert.equal(signalAborted, false);
+  assert.equal(delivered, false);
+  const next = await serviceRequest(service, { request: { command: "quick" } });
+  assert.equal(next.ok, true);
+});
+
 test("controller client disconnect aborts active work and leaves the service reusable", async (t) => {
   const port = await unusedPort();
   let aborted = false;

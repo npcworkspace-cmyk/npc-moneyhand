@@ -1,6 +1,6 @@
 # 性能原则
 
-MoneyHand 的目标是降低 Agent 到真实 Chrome 的总任务时间，而不是追求单个“点击每秒”数字。默认 raw、一个任务期 controller、结构化数据优先和有界批处理是主要性能策略。
+MoneyHand 的目标是降低 Agent 到真实 Chrome 的总任务时间，而不是追求单个“点击每秒”数字。默认 raw、一个可复用 resident controller、结构化数据优先和有界批处理是主要性能策略。
 
 ## 热路径
 
@@ -58,8 +58,10 @@ Agent /专项 Skill
 
 批处理可直接执行账号动作，不受 MoneyHand 二次审批门禁。调用方仍应正确标记 effect，并在启用 rate-control 时处理 unknown-outcome 与限流状态。
 
-这里的 rate-control 约束由调用批处理的 Agent/专项 Skill 显式执行；低层 `request()` 不会自动
-推导 scope 或拦截请求。性能测试必须记录是否所有受控批次都经过 plan/decision/observe。
+高层 Task Space 操作在首次导航取得 origin 后自动经过 rate `wait/observe`；专项 Skill 对自己
+新增的 batch/network 路径显式补充 account、header、latency 与 checkpoint。低层 `request()`
+仍不会自动推导 scope 或拦截请求。性能测试必须分别记录自动 gate 覆盖的高层动作和显式
+plan/decision/observe 覆盖的专项批次。
 
 ## raw、human 与 rate
 

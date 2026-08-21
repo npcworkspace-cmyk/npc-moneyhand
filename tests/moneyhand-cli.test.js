@@ -1,14 +1,23 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createConnection, createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { openRawWebSocket } from "./helpers/raw-websocket.js";
+import {
+  controllerServiceIdentity,
+  pingControllerService,
+  requestControllerService,
+} from "../skills/npc-moneyhand/scripts/lib/controller-service.mjs";
+import {
+  createTaskExecutionId,
+  __test__ as taskLedgerTest,
+} from "../skills/npc-moneyhand/scripts/lib/task-ledger.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const moneyhandPath = join(root, "skills", "npc-moneyhand", "scripts", "moneyhand.mjs");
@@ -142,6 +151,20 @@ async function runCli(argumentsList, timeoutMs = 5_000) {
   };
 }
 
+async function readTextEventually(path, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      return await readFile(path, "utf8");
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    }
+  }
+  throw lastError ?? new Error(`Timed out waiting for ${path}`);
+}
+
 test("CLI --ensure is idempotent under concurrent startup", async (t) => {
   const controllerPort = await unusedPort();
   const extensionPort = await unusedPort();
@@ -259,6 +282,106 @@ test("CLI --stop closes only the selected resident controller", async (t) => {
   assert.equal(status.reused, true);
 });
 
+test("CLI --stop preempts an unresponsive isolated task and releases its Node handles", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-stop-task-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  const portPath = join(directory, "worker-port.txt");
+  await writeFile(taskPath, [
+    "import { createServer } from 'node:net';",
+    "import { writeFile } from 'node:fs/promises';",
+    "export async function run({ args }) {",
+    "  const server = createServer((socket) => socket.end('worker'));",
+    "  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });",
+    "  await writeFile(args.portPath, String(server.address().port), 'utf8');",
+    "  await new Promise(() => {});",
+    "}",
+  ].join("\n"), "utf8");
+  const controllerPort = await unusedPort();
+  const extensionPort = await unusedPort();
+  t.after(() => runCli([
+    "--internal-stop-controller",
+    "--internal-controller-port",
+    String(controllerPort),
+  ]));
+  const ensured = await runCli([
+    "--ensure",
+    "--internal-controller-port", String(controllerPort),
+    "--internal-test-port", String(extensionPort),
+    "--internal-controller-idle-ms", "60000",
+    "--connect-timeout-ms", "3000",
+    "--no-browser-launch",
+  ]);
+  assert.equal(ensured.code, 0, ensured.stderr);
+
+  const taskChild = spawn(process.execPath, [
+    moneyhandPath,
+    "--task", taskPath,
+    "--args-json", JSON.stringify({ portPath }),
+    "--internal-controller-port", String(controllerPort),
+    "--internal-test-port", String(extensionPort),
+    "--connect-timeout-ms", "3000",
+    "--no-browser-launch",
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  t.after(() => {
+    if (taskChild.exitCode === null && taskChild.signalCode === null) taskChild.kill();
+  });
+  const taskMessages = [];
+  createInterface({ input: taskChild.stdout, crlfDelay: Infinity })
+    .on("line", (line) => taskMessages.push(JSON.parse(line)));
+  const opened = await openWebSocketEventually(extensionPort);
+  t.after(() => opened.client.destroy());
+  opened.client.sendJson({
+    v: 2,
+    type: "hello",
+    protocol: "npc-moneyhand/2",
+    product: "npc-moneyhand",
+    profile: "npc-stop-task-cli",
+    instanceId: "instance_stop_task_cli",
+    bootId: "boot_stop_task_cli",
+    version: "1.0.0",
+    auth: { mode: "none" },
+    focus: { windowId: 9, focused: true, lastFocusedAt: 9 },
+    browser: { platform: { os: "test" } },
+    unknownOutcomeIds: [],
+    capabilities: { coordinateContract: "css-viewport-v1" },
+  });
+  assert.equal((await opened.client.nextJson()).type, "ready");
+  const ping = await opened.client.nextJson();
+  opened.client.sendJson({ v: 2, type: "pong", timestamp: ping.timestamp });
+  const workerPort = Number(await readTextEventually(portPath));
+  assert.equal(Number.isInteger(workerPort), true);
+
+  const stopStartedAt = Date.now();
+  const stopped = await runCli([
+    "--stop",
+    "--internal-controller-port", String(controllerPort),
+  ], 12_000);
+  assert.equal(stopped.code, 0, stopped.stderr);
+  assert.equal(Date.now() - stopStartedAt < 10_000, true);
+  assert.equal(stopped.messages.find((message) => message.id === "shutdown")?.value?.stopped, true);
+  const taskExit = taskChild.exitCode === null
+    ? (await waitForClose(taskChild, 3_000))[0]
+    : taskChild.exitCode;
+  assert.equal(taskExit, 1);
+  assert.equal(taskMessages.find((message) => message.id === "task")?.error?.code, "CONTROLLER_SHUTDOWN");
+  await assert.rejects(new Promise((resolvePromise, rejectPromise) => {
+    const socket = createConnection({ host: "127.0.0.1", port: workerPort });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolvePromise();
+    });
+    socket.once("error", rejectPromise);
+  }));
+  await assert.rejects(
+    pingControllerService({ sourcePath: moneyhandPath, port: controllerPort, timeoutMs: 100 }),
+  );
+});
+
 test("CLI resident controller keeps the extension connection across connect and task", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-resident-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -339,11 +462,11 @@ test("CLI resident controller keeps the extension connection across connect and 
   });
   const taskMessages = [];
   const taskLines = createInterface({ input: taskChild.stdout, crlfDelay: Infinity });
-  const attachedMonitorSeen = new Promise((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error("Timed out waiting for attached client monitor")), 13_000);
+  const isolatedHeartbeatSeen = new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for isolated task heartbeat")), 13_000);
     taskLines.on("line", (line) => {
       const message = JSON.parse(line);
-      if (message.event === "moneyhand.task_monitor") {
+      if (message.event === "moneyhand.task_progress" && message.phase === "heartbeat") {
         clearTimeout(timer);
         resolvePromise(message);
       }
@@ -365,11 +488,10 @@ test("CLI resident controller keeps the extension connection across connect and 
   const streamedProgress = await progressSeen;
   assert.equal(streamedProgress.state, "running");
   assert.equal(taskChild.exitCode, null, "progress was buffered until task completion");
-  const attachedMonitor = await attachedMonitorSeen;
-  assert.equal(attachedMonitor.schema, "npc-moneyhand-task-monitor/1");
-  assert.equal(attachedMonitor.phase, "attached-client");
-  assert.equal(attachedMonitor.silenceMs >= 10_000, true);
-  assert.equal(taskChild.exitCode, null, "attached monitor was buffered until controller recovery");
+  const isolatedHeartbeat = await isolatedHeartbeatSeen;
+  assert.equal(isolatedHeartbeat.schema, "npc-moneyhand-task-progress/1");
+  assert.equal(isolatedHeartbeat.silenceMs >= 10_000, true);
+  assert.equal(taskChild.exitCode, null, "the isolated task blocked the resident controller");
   while (true) {
     const request = await opened.client.nextJson();
     if (request.type === "ping") {
@@ -432,6 +554,169 @@ test("CLI resident controller keeps the extension connection across connect and 
   const callMessages = callStdout.trim().split(/\r?\n/u).map((line) => JSON.parse(line));
   assert.equal(callMessages.find((message) => message.id === "call").value.result.targets[0].tabId, 88);
   assert.equal(callMessages.some((message) => message.error?.code === "EADDRINUSE"), false);
+});
+
+test("CLI task survives client loss and a fresh Agent follows its private journal", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-reattach-"));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, [
+    "export async function run({ moneyhand, progress }) {",
+    "  await progress({ phase: 'collect', current: 0, total: 1, checkpoint: 'before-read', message: 'Checkpointed before delayed read' });",
+    "  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1500));",
+    "  const terminal = await moneyhand.request({ method: 'target.list', params: {} });",
+    "  return { status: 'complete', terminal, requirements: [{ id: 'one-read', satisfied: true, expected: 1, actual: 1 }] };",
+    "}",
+  ].join("\n"), "utf8");
+  const controllerPort = await unusedPort();
+  const extensionPort = await unusedPort();
+  const taskExecutionId = createTaskExecutionId();
+  t.after(async () => {
+    await runCli([
+      "--stop",
+      "--internal-controller-port",
+      String(controllerPort),
+    ]).catch(() => {});
+    const build = controllerServiceIdentity(moneyhandPath).build;
+    const paths = taskLedgerTest.ledgerPaths({ build, id: taskExecutionId });
+    await Promise.all([
+      rm(paths.eventsPath, { force: true }),
+      rm(paths.metaPath, { force: true }),
+      rm(paths.evidencePath, { force: true }),
+    ]);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const ensured = await runCli([
+    "--ensure",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--internal-controller-idle-ms",
+    "60000",
+    "--connect-timeout-ms",
+    "3000",
+    "--no-browser-launch",
+  ]);
+  assert.equal(ensured.code, 0, ensured.stderr);
+
+  const detacher = new AbortController();
+  let resolveCheckpoint;
+  const checkpoint = new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for journaled checkpoint")), 5_000);
+    resolveCheckpoint = (message) => {
+      if (message.event === "moneyhand.task_progress" && message.checkpoint === "before-read") {
+        clearTimeout(timer);
+        resolvePromise(message);
+      }
+    };
+  });
+  const detachedRequest = requestControllerService({
+    sourcePath: moneyhandPath,
+    port: controllerPort,
+    request: {
+      command: "task",
+      taskExecutionId,
+      taskPath,
+      taskArgs: {},
+      taskTimeoutMs: 10_000,
+      taskAbortGraceMs: 1_000,
+      connectTimeoutMs: 3_000,
+      autoLaunchBrowser: false,
+    },
+    timeoutMs: 15_000,
+    signal: detacher.signal,
+    onMessage(message) {
+      resolveCheckpoint?.(message);
+    },
+  }).then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error }),
+  );
+
+  const opened = await openWebSocketEventually(extensionPort);
+  t.after(() => opened.client.destroy());
+  opened.client.sendJson({
+    v: 2,
+    type: "hello",
+    protocol: "npc-moneyhand/2",
+    product: "npc-moneyhand",
+    profile: "npc-reattach-cli",
+    instanceId: "instance_reattach_cli",
+    bootId: "boot_reattach_cli",
+    version: "1.0.0",
+    auth: { mode: "none" },
+    focus: { windowId: 5, focused: true, lastFocusedAt: 5 },
+    browser: { platform: { os: "test" } },
+    unknownOutcomeIds: [],
+    capabilities: { coordinateContract: "css-viewport-v1" },
+  });
+  assert.equal((await opened.client.nextJson(3_000)).type, "ready");
+  const confirmation = await opened.client.nextJson(3_000);
+  assert.equal(confirmation.type, "ping");
+  opened.client.sendJson({ v: 2, type: "pong", timestamp: confirmation.timestamp });
+  await checkpoint;
+  detacher.abort(new Error("simulated Agent disconnect"));
+  const detached = await detachedRequest;
+  assert.equal(detached.ok, false);
+
+  const followChild = spawn(process.execPath, [
+    moneyhandPath,
+    "--task-follow",
+    taskExecutionId,
+    "--internal-controller-port",
+    String(controllerPort),
+  ], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  t.after(() => {
+    if (followChild.exitCode === null && followChild.signalCode === null) followChild.kill();
+  });
+  followChild.stderr.setEncoding("utf8");
+  let followError = "";
+  followChild.stderr.on("data", (chunk) => { followError += chunk; });
+  const followMessages = [];
+  createInterface({ input: followChild.stdout, crlfDelay: Infinity })
+    .on("line", (line) => followMessages.push(JSON.parse(line)));
+
+  while (true) {
+    const request = await opened.client.nextJson(4_000);
+    if (request.type === "ping") {
+      opened.client.sendJson({ v: 2, type: "pong", timestamp: request.timestamp });
+      continue;
+    }
+    assert.equal(request.method, "target.list");
+    opened.client.sendJson({
+      v: 2,
+      type: "response",
+      id: request.id,
+      ok: true,
+      result: { targets: [{ tabId: 501 }] },
+    });
+    break;
+  }
+  assert.equal((await waitForClose(followChild, 8_000))[0], 0, followError);
+  const status = followMessages.find((message) => message.event === "moneyhand.task_status");
+  assert.equal(status.status.state, "running");
+  const terminal = followMessages.find((message) => message.type === "result" && message.id === "task");
+  assert.equal(terminal.ok, true);
+  assert.equal(terminal.reattached, true);
+  assert.equal(terminal.value.terminal.result.targets[0].tabId, 501);
+  assert.equal(terminal.completionGate.passed, true);
+  assert.equal(terminal.taskEvidence.artifact.private, true);
+
+  const queried = await runCli([
+    "--task-status",
+    taskExecutionId,
+    "--internal-controller-port",
+    String(controllerPort),
+  ]);
+  assert.equal(queried.code, 0, queried.stderr);
+  const queriedStatus = queried.messages.find((message) => message.id === "task-status").value;
+  assert.equal(queriedStatus.state, "completed");
+  assert.equal(queriedStatus.terminal.ok, true);
 });
 
 test("CLI exits nonzero when a task result is ok false", async (t) => {
@@ -585,6 +870,13 @@ test("CLI --connect returns one bounded ready result on its isolated test port",
   assert.equal(result.value.status, "connected");
   assert.equal(result.value.connected, true);
   assert.equal(result.value.nextAction, "ready_for_tasks");
+  assert.deepEqual(result.value.taskRouting, {
+    currentConversationHasTask: "continue_immediately_without_reconfirmation",
+    noConcreteTask: "ask_user_for_task",
+    stopAfterConnectWhenTaskExists: "invalid",
+    taskModule: "copy_and_implement_never_run_packaged_template",
+  });
+  assert.match(result.value.userMessage, /已有具体任务.*立即继续/u);
   assert.equal(result.value.acceptance.status, "not_run");
   assert.equal(result.value.acceptance.reason, "isolated-test-port");
   assert.equal(messages.some((message) => message.event === "moneyhand.listening"), false);
@@ -686,6 +978,43 @@ test("CLI --connect stops after the single user-confirmed retry", async () => {
   });
   assert.equal("retryCommand" in result.value, false);
   assert.equal(messages.at(-1).event, "moneyhand.stopped");
+});
+
+test("resident controller stops itself after a terminal blocked connect result", async (t) => {
+  const controllerPort = await unusedPort();
+  const extensionPort = await unusedPort();
+  t.after(() => runCli([
+    "--stop",
+    "--internal-controller-port",
+    String(controllerPort),
+  ]));
+  const result = await runCli([
+    "--connect",
+    "--after-user-action",
+    "--internal-controller-port",
+    String(controllerPort),
+    "--internal-test-port",
+    String(extensionPort),
+    "--internal-controller-idle-ms",
+    "60000",
+    "--connect-timeout-ms",
+    "25",
+    "--no-browser-launch",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.messages.find((message) => message.id === "connect").value.status, "blocked");
+
+  let stopped = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      await pingControllerService({ sourcePath: moneyhandPath, port: controllerPort, timeoutMs: 50 });
+    } catch {
+      stopped = true;
+      break;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  assert.equal(stopped, true, "blocked connect left the resident controller running");
 });
 
 test("CLI missing-extension recovery uses the same single user-confirmed retry", async () => {

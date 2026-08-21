@@ -9,12 +9,21 @@ For a standalone deterministic scheduler, import `createRateController(options)`
 methods directly. The unified controller exposes the same scheduler through
 `moneyhand.rateControl({ action, input })` and the JSONL `rateControl` operation.
 
-This is an explicit caller scheduler, not an implicit interceptor. A plain `moneyhand.request()` has
-no trustworthy origin/Profile/account rate scope and is not automatically blocked by an open rate
-circuit. The calling Agent or composed Skill must consult the decision before each governed batch,
-honor concurrency/interval/wait/stop, and then report bounded observations. The capability advertises
-`enforcement:"explicit-caller-scheduler"` and `implicitRequestGate:false` so adapters cannot mistake
-the scheduler for a transport-level gate.
+MoneyHand uses this scheduler in two layers:
+
+- In the normal `--task` path, once `beginTaskContext()` pins the Profile and a high-level navigation
+  establishes an HTTP(S) origin, MoneyHand automatically calls `wait` before high-level Task Space
+  navigation, semantic, scrolling, capture, and `taskRequest` operations. It observes clean terminals
+  and recognizable 403/429/503, throttle, challenge, and account-change errors. An open circuit blocks
+  the next operation before browser dispatch.
+- A specialized Skill uses the explicit scheduler to add evidence the generic wrapper cannot infer:
+  account scope, batch boundaries, `Retry-After`, response headers, latency, and a durable continuation
+  checkpoint. It must honor returned concurrency/interval/wait/stop.
+
+A plain unscoped `moneyhand.request()` still has no trustworthy origin/Profile/account scope and is not
+intercepted. The capability therefore distinguishes `taskRuntimeImplicitGate:true` from
+`implicitRequestGate:false`; it is not a transport-wide interceptor. Human behavior never bypasses
+either path.
 
 ## Actions
 
@@ -32,21 +41,21 @@ Call one operation with `action` and an action-specific `input`:
 A scope uses an HTTP(S) origin only, not a full URL:
 
 ```json
-{"origin":"https://www.reddit.com","profile":"work","account":"optional-local-label"}
+{"origin":"https://example.com","profile":"work","account":"optional-local-label"}
 ```
 
 ## Pilot and observe
 
-Ask for a plan before the first bounded batch:
+When writing a specialized scheduler, ask for a plan before the first bounded batch:
 
 ```json
-{"id":"rate-plan-1","op":"rateControl","args":{"action":"plan","input":{"scope":{"origin":"https://www.reddit.com","profile":"work"},"mode":"raw"}}}
+{"id":"rate-plan-1","op":"rateControl","args":{"action":"plan","input":{"scope":{"origin":"https://example.com","profile":"work"},"mode":"raw"}}}
 ```
 
 After every representative response or batch, report only bounded control evidence:
 
 ```json
-{"id":"rate-observe-1","op":"rateControl","args":{"action":"observe","input":{"scope":{"origin":"https://www.reddit.com","profile":"work"},"mode":"raw","status":429,"headers":{"retry-after":"30"},"latencyMs":2100,"checkpoint":"page:7"}}}
+{"id":"rate-observe-1","op":"rateControl","args":{"action":"observe","input":{"scope":{"origin":"https://example.com","profile":"work"},"mode":"raw","status":429,"headers":{"retry-after":"30"},"latencyMs":2100,"checkpoint":"page:7"}}}
 ```
 
 Use the returned `decision.concurrency`, `intervalMs`, `waitMs`, `checkpointRequired`, and `stop` as
@@ -63,14 +72,15 @@ The controller:
 
 Within this scheduler, human behavior does not relax a decision. `mode:"human"` produces the same
 cooldown and circuit rules as `raw`. This statement does not mean that unrelated plain requests are
-intercepted; the caller must route every governed batch through the scheduler lifecycle above.
+intercepted. Normal high-level Task Space operations are already routed automatically; a specialized
+Skill must explicitly schedule any extra batch/network path it introduces.
 
 ## Checkpoint, wait, and resume
 
 If `checkpointRequired` is true, save the collection's opaque continuation token:
 
 ```json
-{"id":"rate-checkpoint-1","op":"rateControl","args":{"action":"checkpoint","input":{"scope":{"origin":"https://www.reddit.com","profile":"work"},"token":"page:7"}}}
+{"id":"rate-checkpoint-1","op":"rateControl","args":{"action":"checkpoint","input":{"scope":{"origin":"https://example.com","profile":"work"},"token":"page:7"}}}
 ```
 
 Checkpoint tokens are caller-defined resumable identifiers only. Do not store cookies, authorization

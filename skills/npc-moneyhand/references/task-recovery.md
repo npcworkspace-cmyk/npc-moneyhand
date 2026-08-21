@@ -33,6 +33,26 @@ caller omits it. It deliberately does not inject an aborted signal into `complet
 those cleanup calls. An explicitly not-dispatched `BUSY` during cleanup may be retried only inside the
 built-in bounded cleanup window; unknown outcomes are not replayed.
 
+## Lost Agent client and reattachment
+
+A controller command socket is not the task owner. Once a `taskExecutionId` is registered, the
+resident controller writes each event to a private, build-bound journal before attempting to send it
+to the attached Agent. A TCP reset, command-tool timeout, or Agent restart therefore closes only that
+client; the task, watchdog, exact Task Space, and cleanup continue under the resident controller.
+
+Never submit another `--task` to recover a lost handle. Use the retained ID:
+
+```text
+node scripts/moneyhand.mjs --task-status "TASK_EXECUTION_ID"
+node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"
+```
+
+If the ID was not retained, use `--task-last` once. `--task-follow` first reports current status, then
+streams only newer journal entries and the original terminal result with `reattached:true`. A terminal
+record is returned immediately; `state:"interrupted"` produces `TASK_EXECUTION_INTERRUPTED` and never
+restarts browser work. Journals contain bounded event/result metadata and a private evidence artifact,
+not an authorization to copy sensitive page content into shared logs.
+
 ## Visual blocker recovery
 
 The task runtime captures one current-viewport PNG for visible-page timeouts, occlusion, stale or
@@ -43,7 +63,8 @@ the failed action.
 Monitoring starts before task-module import. The base heartbeat is emitted at least every 10 seconds.
 After 15 seconds without task/browser activity, the watchdog starts a concurrent read-only visual
 inspection and can repeat within the task budget, up to 120 captures. These are hard maximums: an
-embedding caller may tighten but cannot relax them. If synchronous task code blocks the controller,
+embedding caller may tighten but cannot relax them. Synchronous task code runs in an isolated Worker,
+so the controller watchdog remains responsive. If the controller or output transport itself stalls,
 the attached CLI emits `moneyhand.task_monitor`; after the event loop recovers, MoneyHand captures the
 current task page before cleanup. `completeTaskContext` first pauses and drains in-flight watchdog
 observation, so screenshots cannot race task-window removal. Monitoring never extends the task deadline
@@ -83,7 +104,11 @@ and never proves that an in-page action did not dispatch.
 
 ## Page-health decision
 
-After an unexpected page-read failure, call `probeTaskContext()` once:
+For normal `--task` high-level operations, the runtime classifies the failure first. Only these
+proven-not-dispatched transients are eligible for one same-page probe and one automatic retry:
+`BUSY`, `NAVIGATION_PREFLIGHT_FAILED`, `PAGE_TRANSITION_BUSY`, `TASK_PAGE_UNHEALTHY`, and
+`TASK_TAB_UNHEALTHY`. An embedding adapter that is not using the task wrapper may call
+`probeTaskContext()` once:
 
 - `healthy:true`: inspect the current page and continue from observed state;
 - `healthy:false, stage:"page"`: checkpoint, complete the context, then run the fixed connection flow
@@ -92,6 +117,11 @@ After an unexpected page-read failure, call `probeTaskContext()` once:
   account or Profile.
 
 Do not loop connection attempts or silently restart work under a different browser identity.
+
+The emitted `moneyhand.task_recovery` record is the authoritative state transition. The maximum is
+two attempts total. Stale/ambiguous/occluded refs move to `refresh_target` with no replay; connection
+or session loss moves to terminal fixed-connect-once recovery; `actionDispatched:true` or unknown
+moves to `outcome_unknown` and inspection only.
 
 ## Screenshot terminals
 
@@ -107,12 +137,18 @@ are not automatically retried. See `browser-workflows.md` for coordinate and fil
 
 | Evidence | Decision |
 | --- | --- |
-| Validation/effect failure before input | Correct the request; a new dispatch may be safe |
-| Explicit `actionDispatched:false` | A corrected retry may be safe |
+| Validation/effect failure before input | Correct the request; use a new stable `effectId` only if the intended action actually changed |
+| Whitelisted transient plus explicit `actionDispatched:false` | Built-in wrapper probes the same task page and retries once; caller does not add another loop |
+| Other explicit `actionDispatched:false` | Correct or inspect; no generic automatic replay |
 | Stale ref, occlusion, ambiguity | Use the attached current evidence and acquire a fresh target |
 | `OUTCOME_UNKNOWN`, dispatch true, post-dispatch timeout or disconnect | Inspect real state; never replay blindly |
 | Postcondition failed after dispatch | Treat as possibly successful until inspected |
 | Cleanup incomplete | Return `incomplete`, preserve evidence, and do not close another window |
+
+When a replay-sensitive high-level call includes `effectId`, MoneyHand emits a receipt before dispatch.
+An identical concurrent/later call reuses the first Promise/result. Rebinding the ID to different
+arguments fails before dispatch. An `outcome_unknown` receipt remains unresolved, prevents a supported
+completion claim, and is never converted into a retry.
 
 MoneyHand uses request-local `onUnclear:"error"` for ownership checks, navigation dispatch, and
 readiness probes so a transient CDP read failure does not silently turn the task into an Agent wait.
@@ -122,4 +158,7 @@ one inspection of the current URL and page before any new decision.
 
 Completion remains evidence-based: required child records and fields must be present for every claimed
 item. An empty array proves zero only when the page/source proves zero. Normalize canonical IDs or URLs
-before appending; two visits to the same canonical URL are one item, never two completed items.
+before appending; two visits to the same canonical URL are one item, never two completed items. A
+claimed `complete` result is rejected when cleanup, effect receipts, rate state, instruction state, or
+declared requirements remain unresolved; inspect `completionGate.checks` instead of rewriting the
+result as success.

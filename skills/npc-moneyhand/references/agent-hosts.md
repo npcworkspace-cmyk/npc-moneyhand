@@ -57,12 +57,17 @@ debugging, another extension, or a temporary control script as startup recovery.
 Run `--task` in the foreground with stdout attached until its terminal `id:"task"` result. Never use a
 detached/background/fire-and-forget process. MoneyHand emits `moneyhand.task_progress` at least every
 10 seconds and starts a visual inspection after 15 seconds of task silence; task code cannot relax
-either threshold. If task code blocks the controller, the attached CLI emits `moneyhand.task_monitor`
+either threshold. Task code runs in an isolated Worker and cannot block the controller watchdog. If
+the controller or output transport itself stops reporting, the attached CLI emits `moneyhand.task_monitor`
 and MoneyHand captures the page before cleanup after recovery.
 If the host yields a process/session handle, resume that exact handle at least every 30 seconds, relay meaningful or visual events
-immediately, and give the user a still-running update at least every 30 seconds. MoneyHand
-cannot call a host-specific Agent scheduler; hosts that cannot retain or resume the command do not
-support unattended long tasks.
+immediately, and give the user a still-running update at least every 30 seconds. Save the
+`moneyhand.task_submitted.taskExecutionId`. If the handle or Agent client is lost, never resubmit the
+module: run `node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"`; use `--task-status` for a
+one-shot read and `--task-last` only when the ID was lost. The resident task journals before delivery
+and continues across a client disconnect. Each task event's `relay` tells the host whether to wake the
+Agent and notify the user. MoneyHand cannot call a host-specific Agent scheduler or create a new turn
+inside it, so the host must consume either the original attached stream or this follow stream.
 
 ## Native Skill locations
 

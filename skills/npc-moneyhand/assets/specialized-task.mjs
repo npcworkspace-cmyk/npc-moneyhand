@@ -1,3 +1,7 @@
+// Copy this file into the specialized Skill and replace its bounded workflow placeholder.
+// MoneyHand rejects this sentinel at runtime, including in an unchanged copy.
+export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";
+
 function taskError(error) {
   return {
     code: typeof error?.code === "string" ? error.code : "TASK_FAILED",
@@ -37,7 +41,7 @@ async function attachTerminalVisual(moneyhand, task, outcome) {
   }
 }
 
-export async function run({ moneyhand, signal, args = {}, progress }) {
+export async function run({ moneyhand, signal, args = {}, progress, taskExecutionId }) {
   const task = await moneyhand.beginTaskContext({
     ...(args.taskId ? { id: args.taskId } : {}),
     behavior: args.behavior === "human" ? "human" : "raw",
@@ -53,10 +57,17 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     // Replace only this outcome with the specialized Skill's bounded domain workflow.
     // Reuse moneyhand and task; never start or stop another controller here. Call
     // progress({phase,message,current,total,checkpoint}) after every bounded batch.
+    // captureSemanticSnapshot needs tabId but no selector in this task runner;
+    // selector is a browser-session object, never CSS. Type uses text; select uses options.
+    // Navigation helpers inject effect "navigation" and scrollTaskTab injects "input";
+    // provide stable effectId values but do not override those fixed effects.
+    // Use stable effectId values for replay-sensitive calls and return explicit
+    // {id,satisfied,expected,actual} requirements before claiming complete.
     outcome = {
       status: "incomplete",
       reason: "SPECIALIZED_WORKFLOW_NOT_IMPLEMENTED",
       counts: {},
+      requirements: [{ id: "specialized-workflow-implemented", satisfied: false }],
       evidence: [],
       checkpoint: null,
     };
@@ -70,6 +81,7 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
       reason: normalized.code,
       error: normalized,
       counts: {},
+      requirements: [{ id: "specialized-workflow-finished-with-proof", satisfied: false }],
       evidence: visualFallback?.captured
         ? [{ type: "visual-fallback", path: visualFallback.screenshot.path }]
         : [],
@@ -88,6 +100,7 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     outcome = { ...outcome, status: "incomplete", reason: "TASK_CLEANUP_INCOMPLETE" };
   }
   return {
+    taskExecutionId,
     task: { page: task.page, behavior: task.behavior },
     outcome,
     lifecycle,

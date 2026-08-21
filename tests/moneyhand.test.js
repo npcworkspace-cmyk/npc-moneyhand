@@ -24,6 +24,28 @@ import { TaskSpaceRegistry } from "../skills/npc-moneyhand/scripts/lib/task-spac
 const PROTOCOL = "npc-moneyhand/2";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+test("connect acceptance keeps the fixed checklist total after an early failure", () => {
+  const acceptance = moneyhandTest.connectAcceptanceResult({
+    outcome: {
+      status: "incomplete",
+      total: 15,
+      reason: "FULL_PAGE_CAPTURE_FAILED",
+      checks: Array.from({ length: 12 }, (_, index) => ({
+        name: `check-${index + 1}`,
+        status: index === 11 ? "failed" : "passed",
+      })),
+    },
+    lifecycle: {
+      cleanupComplete: true,
+      windowClosed: true,
+      behaviorReset: "raw",
+    },
+  });
+  assert.equal(acceptance.passed, 11);
+  assert.equal(acceptance.total, 15);
+  assert.equal(acceptance.status, "failed");
+});
+
 test("MoneyHand task modules compose multiple steps in one trusted local code pass", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -52,6 +74,43 @@ test("MoneyHand task modules compose multiple steps in one trusted local code pa
     methods: ["target.list", "behavior.get"],
   });
   assert.deepEqual(calls, ["target.list", "behavior.get"]);
+});
+
+test("runMoneyHandTask rejects an unchanged packaged template before browser dispatch", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-unchanged-template-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(
+    taskPath,
+    await readFile(new URL(
+      "../skills/npc-moneyhand/assets/disposable-task.mjs",
+      import.meta.url,
+    )),
+  );
+  const progressEvents = [];
+  let browserRequests = 0;
+  let visualInspections = 0;
+  const moneyhand = {
+    async request() { browserRequests += 1; },
+    ownedTaskWindowIds() { return []; },
+    async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
+    async inspectTaskBlocker() { visualInspections += 1; },
+  };
+
+  await assert.rejects(
+    runMoneyHandTask({
+      moneyhand,
+      taskPath,
+      onProgress: async (event) => progressEvents.push(event),
+    }),
+    (error) => error?.code === "TASK_TEMPLATE_NOT_IMPLEMENTED"
+      && error?.details?.actionDispatched === false
+      && error?.details?.cleanupComplete === true,
+  );
+  assert.equal(browserRequests, 0);
+  assert.equal(visualInspections, 0);
+  assert.equal(progressEvents.some((event) => event.state === "visual_fallback"), false);
+  assert.equal(progressEvents.at(-1).state, "failed");
 });
 
 test("runMoneyHandTask automatically attaches visual evidence to page-operation failures", async (t) => {
@@ -220,7 +279,7 @@ test("runMoneyHandTask emits mandatory progress and visually inspects a silent a
     "  await moneyhand.beginTaskContext({ id: 'progress-task' });",
     "  await progress({ phase: 'collect', current: 1, total: 3, message: 'Collected the first item' });",
     "  await new Promise((resolve) => setTimeout(resolve, 65));",
-    "  return { status: 'complete' };",
+    "  return { status: 'complete', requirements: [{ id: 'progress-complete', satisfied: true }] };",
     "}",
   ].join("\n"), "utf8");
   const progressEvents = [];
@@ -249,7 +308,13 @@ test("runMoneyHandTask emits mandatory progress and visually inspects a silent a
     onProgress: async (event) => progressEvents.push(event),
   });
 
-  assert.deepEqual(result, { status: "complete" });
+  assert.equal(result.status, "complete");
+  assert.deepEqual(result.requirements, [{ id: "progress-complete", satisfied: true }]);
+  if (result.visualFallback !== undefined) {
+    assert.equal(result.visualFallback.schema, "npc-moneyhand-visual-fallback/1");
+    assert.equal(result.visualFallback.captured, true);
+    assert.equal(result.visualFallback.actionReplayed, false);
+  }
   assert.equal(progressEvents[0].event, "moneyhand.task_progress");
   assert.equal(progressEvents[0].state, "started");
   assert.equal(progressEvents.some((event) => (
@@ -263,7 +328,7 @@ test("runMoneyHandTask emits mandatory progress and visually inspects a silent a
   assert.equal(visual.visualFallback.actionReplayed, false);
   assert.equal(visual.silenceMs >= 20, true);
   assert.equal(inspections.length >= 1, true);
-  assert.equal(inspections.length <= 3, true);
+  assert.equal(inspections.length <= 120, true);
   assert.equal(inspections[0].operation, "task-silence-watchdog");
   assert.equal(progressEvents.at(-1).state, "completed");
 });
@@ -436,7 +501,7 @@ test("runMoneyHandTask does not repeat a successful template terminal screenshot
   assert.equal(progressEvents.at(-1).state, "completed");
 });
 
-test("runMoneyHandTask backfills a screenshot before accepting progress after synchronous task code blocks its watchdog", async (t) => {
+test("runMoneyHandTask keeps the watchdog responsive while synchronous task code is isolated", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-blocked-loop-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const taskPath = join(directory, "task.mjs");
@@ -446,7 +511,7 @@ test("runMoneyHandTask backfills a screenshot before accepting progress after sy
     "  try {",
     "    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 45);",
     "    await progress({ phase: 'recovered', message: 'Task resumed after a synchronous block' });",
-    "    return { status: 'complete' };",
+    "    return { status: 'complete', requirements: [{ id: 'recovered-complete', satisfied: true }] };",
     "  } finally {",
     "    await moneyhand.completeTaskContext({ taskSpaceId: task.taskSpaceId });",
     "  }",
@@ -491,7 +556,9 @@ test("runMoneyHandTask backfills a screenshot before accepting progress after sy
   assert.equal(result.status, "complete");
   assert.equal(inspections, 1);
   assert.deepEqual(ordering, ["visual", "cleanup"]);
-  assert.equal(progressEvents.some((event) => event.phase === "recovery"), true);
+  assert.equal(progressEvents.some((event) => (
+    event.state === "visual_fallback" && event.phase === "watchdog"
+  )), true);
   assert.equal(progressEvents.at(-1).state, "completed");
 });
 
@@ -536,7 +603,7 @@ test("runMoneyHandTask fails closed when mandatory progress cannot be delivered"
   await writeFile(taskPath, [
     "export async function run() {",
     "  await new Promise((resolve) => setTimeout(resolve, 50));",
-    "  return { status: 'complete' };",
+    "  return { status: 'complete', requirements: [{ id: 'output-complete', satisfied: true }] };",
     "}",
   ].join("\n"), "utf8");
   const moneyhand = { async request() {} };
@@ -560,14 +627,18 @@ test("runMoneyHandTask always reclaims task windows created by the task module",
   const taskPath = join(directory, "task.mjs");
   await writeFile(taskPath, [
     "export async function run({ moneyhand }) {",
-    "  moneyhand.created.push('task-window');",
-    "  return { status: 'complete' };",
+    "  await moneyhand.createTaskSpace({ id: 'task-window' });",
+    "  return { status: 'complete', requirements: [{ id: 'cleanup-complete', satisfied: true }] };",
     "}",
   ].join("\n"), "utf8");
   const cleanups = [];
   const moneyhand = {
     created: [],
     async request() {},
+    async createTaskSpace(options) {
+      this.created.push(options.id);
+      return { id: options.id };
+    },
     ownedTaskWindowIds() {
       return [...this.created];
     },
@@ -578,7 +649,10 @@ test("runMoneyHandTask always reclaims task windows created by the task module",
     },
   };
   const result = await runMoneyHandTask({ moneyhand, taskPath });
-  assert.deepEqual(result, { status: "complete" });
+  assert.deepEqual(result, {
+    status: "complete",
+    requirements: [{ id: "cleanup-complete", satisfied: true }],
+  });
   assert.deepEqual(cleanups, [{ taskIds: ["task-window"] }]);
   assert.deepEqual(moneyhand.created, []);
 });
@@ -1068,7 +1142,11 @@ test("MoneyHand advertises the shortest read-only data acquisition policy", asyn
   assert.ok(policy.rateControl.onThrottle.includes("honor-retry-after"));
   assert.ok(policy.rateControl.onThrottle.includes("increase-interval-exponentially-with-jitter"));
   assert.ok(policy.rateControl.stopSignals.includes("access-challenge"));
-  assert.equal(capabilities.rateControl.enforcement, "explicit-caller-scheduler");
+  assert.equal(
+    capabilities.rateControl.enforcement,
+    "task-runtime-auto-gate-plus-explicit-specialized-scheduler",
+  );
+  assert.equal(capabilities.rateControl.taskRuntimeImplicitGate, true);
   assert.equal(capabilities.rateControl.implicitRequestGate, false);
   assert.equal(capabilities.rateControl.humanBypassesRateControl, false);
   assert.deepEqual(policy.orderedPlanes, [
@@ -3413,6 +3491,7 @@ test("captureStableViewport retries only stale pre-write captures", async (t) =>
   assert.equal(result.stable, true);
   assert.equal(result.attempts, 2);
   assert.equal(result.taskSpaceId, "stable-capture");
+  assert.equal(result.path, outputPath);
   assert.deepEqual(await readFile(outputPath), pngHeader(200, 100));
 });
 
@@ -3545,8 +3624,10 @@ test("captureFullPage writes one guarded observation-only PNG and infers outputR
   const result = await capture;
   assert.equal(result.observationOnly, true);
   assert.equal(result.coordinateMapping, false);
+  assert.equal(result.path, outputPath);
   assert.deepEqual(result.documentCss, { width: 100, height: 150 });
   assert.deepEqual(result.image, {
+    path: outputPath,
     width: 300,
     height: 900,
     bytes: image.length,

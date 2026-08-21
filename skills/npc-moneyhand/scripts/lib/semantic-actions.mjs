@@ -403,7 +403,13 @@ export function normalizeSemanticRefAction(value) {
       4_096,
     ));
   } else if (input.action === "select") {
-    output.options = normalizeSelectOptions(input.options);
+    if (input.options !== undefined && input.value !== undefined) {
+      throw new SemanticActionError(
+        "INVALID_SEMANTIC_ACTION",
+        "select accepts options or the value compatibility alias, not both",
+      );
+    }
+    output.options = normalizeSelectOptions(input.options ?? input.value);
   } else if (input.action === "check" || input.action === "uncheck") {
     // The action name is the complete desired binary checked-state intent.
     if (Object.hasOwn(input, "checked")) {
@@ -413,7 +419,13 @@ export function normalizeSemanticRefAction(value) {
       );
     }
   } else if (input.action === "type") {
-    output.text = boundedString(input.text, "text", MAX_TEXT_CHARS);
+    if (input.text !== undefined && input.value !== undefined) {
+      throw new SemanticActionError(
+        "INVALID_SEMANTIC_ACTION",
+        "type accepts text or the value compatibility alias, not both",
+      );
+    }
+    output.text = boundedString(input.text ?? input.value, "text", MAX_TEXT_CHARS);
     if (input.replace !== undefined && typeof input.replace !== "boolean") {
       throw new SemanticActionError("INVALID_SEMANTIC_ACTION", "replace must be boolean");
     }

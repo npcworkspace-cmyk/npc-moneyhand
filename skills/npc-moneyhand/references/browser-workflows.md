@@ -40,6 +40,9 @@ account state and rate signals. On HTTP 429/503, `Retry-After`, throttle payload
 latency regression: checkpoint, lower concurrency before increasing delay, add jitter, and retry only
 known reads. Stop on challenge, persistent 403, account-state change or repeated throttle at minimum
 concurrency. Recover through consecutive clean small batches and never exceed the last safe rate.
+The trusted `--task` wrapper automatically gates high-level Task Space operations by navigated origin
+and pinned Profile; use explicit `rateControl` for richer account/header/batch evidence or for a path
+outside those helpers. Plain low-level `request()` remains unscoped and is not auto-gated.
 
 ## Page transitions
 
@@ -96,7 +99,6 @@ and key. Always supply Task Space, fresh snapshot/ref, explicit effect and a mea
 ```js
 const { snapshot } = await moneyhand.captureSemanticSnapshot({
   tabId: task.tabId,
-  selector: task.selector,
   maxNodes: 800,
 });
 const target = snapshot.nodes.find((node) => node.role === "link" && node.href);
@@ -109,6 +111,10 @@ await moneyhand.actSemanticRef({
   verification: { kind: "url-changed" },
 });
 ```
+
+In a task module, omit `selector`: the runtime pins this observation to the active Task Context.
+That field selects a browser session and is never a DOM/CSS selector. Type actions use `text` and
+select actions use `options`; `value` is accepted as a compatibility alias for either one.
 
 The argument to `snapshotId` is the string `snapshot.id`, not the snapshot object. `action` must be a
 top-level string. `effect` and `verification` are top-level siblings, never fields inside `action`.
@@ -174,7 +180,8 @@ an explicit existing `outputRoot` and a new `outputPath`. It binds Profile boot,
 viewport/scroll/DPR/zoom and PNG dimensions, then returns an explicit image-to-CSS mapping. Treat the
 PNG as sensitive local task data and do not overwrite files.
 
-Stable success returns `{bundle, taskSpaceId, tabId, attempts, stable:true}`. Exhausted stale captures
+Stable success returns `{bundle, taskSpaceId, tabId, path, attempts, stable:true}`, where `path` is the
+exact newly written PNG. Exhausted stale captures
 throw `VIEWPORT_NOT_STABLE`; any failed capture terminal immediately throws
 `VIEWPORT_CAPTURE_FAILED` with `actionDispatched:false` and writes no file. Do not infer success from
 the helper returning an object with a false stability flag: that shape is not a success result.
@@ -185,8 +192,8 @@ scroll, resize, zoom, frame movement, Profile switch or unknown outcome. A full-
 not have this click contract and remains observation-only. Use `captureFullPage()` only after the
 task has expanded the desired content; it requests the whole document, checks page guards before and
 after, writes at most one new PNG, and rejects responses above the Extension's 4 MiB decoded limit.
-Success explicitly returns `observationOnly:true`, `coordinateMapping:false`, document/image metadata,
-and a SHA-256. Exhausted stale guards throw `FULL_PAGE_NOT_STABLE`; other capture-stage failures are
+Success explicitly returns top-level `path`, `observationOnly:true`, `coordinateMapping:false`,
+document/image metadata, and a SHA-256. Exhausted stale guards throw `FULL_PAGE_NOT_STABLE`; other capture-stage failures are
 not retried.
 
 ## Bounded page-health recovery

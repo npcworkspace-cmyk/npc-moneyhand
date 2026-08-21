@@ -81,6 +81,10 @@ const requiredFiles = [
   "skills/npc-moneyhand/scripts/lib/browser-discovery.mjs",
   "skills/npc-moneyhand/scripts/lib/browser-launch.mjs",
   "skills/npc-moneyhand/scripts/lib/controller-service.mjs",
+  "skills/npc-moneyhand/scripts/lib/task-effects.mjs",
+  "skills/npc-moneyhand/scripts/lib/task-evidence.mjs",
+  "skills/npc-moneyhand/scripts/lib/task-ledger.mjs",
+  "skills/npc-moneyhand/scripts/lib/task-recovery-state.mjs",
   "skills/npc-moneyhand/scripts/moneyhand.mjs",
   "skills/npc-moneyhand/scripts/lib/agent-descriptor.mjs",
   "skills/npc-moneyhand/scripts/lib/peer.mjs",
@@ -214,7 +218,8 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.progress?.streamsBeforeTaskCompletion !== true
   || contract.taskRuntime?.progress?.screenshotOnSilence !== true
   || contract.transports?.taskModule?.flag !== "--task"
-  || contract.transports?.taskModule?.signature !== "run({ moneyhand, signal, args, progress })"
+  || contract.transports?.taskModule?.signature
+    !== "run({ moneyhand, signal, args, progress, taskExecutionId })"
   || contract.transports?.taskModule?.timeoutFlag !== "--task-timeout-ms"
   || contract.transports?.taskModule?.defaultTimeoutMs !== 1800000
   || contract.transports?.taskModule?.maximumTimeoutMs !== 86400000
@@ -256,7 +261,9 @@ if (acquisitionPolicy?.objective !== "minimum-total-elapsed-time"
   || acquisitionPolicy.rules?.screenshotLastResort !== true) {
   fail("standalone Skill data-acquisition policy is invalid");
 }
-if (contract.operationContracts?.rateControl?.enforcement !== "explicit-caller-scheduler"
+if (contract.operationContracts?.rateControl?.enforcement
+    !== "task-runtime-auto-gate-plus-explicit-specialized-scheduler"
+  || contract.operationContracts?.rateControl?.taskRuntimeImplicitGate !== true
   || contract.operationContracts?.rateControl?.implicitRequestGate !== false) {
   fail("standalone Skill rate-control enforcement boundary is invalid");
 }

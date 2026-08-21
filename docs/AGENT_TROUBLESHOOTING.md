@@ -114,6 +114,24 @@ import { createMoneyHand } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
 30 分钟总 deadline。若控制台既无 progress/monitor 也无 terminal，应将其视为输出链或进程故障，
 不要再静默启动第二份 MJS/controller。
 
+## Agent、终端或命令句柄断开
+
+先区分“调用客户端断开”和“controller/Extension 断开”。`--task` 输出的
+`moneyhand.task_submitted.taskExecutionId` 是恢复键；controller 注册后把每个事件先写入本机私有
+journal，再尝试发给客户端。单个调用 socket 消失不会取消 resident task。
+
+不得重新运行原 MJS。按固定顺序：
+
+~~~text
+node scripts/moneyhand.mjs --task-status "TASK_EXECUTION_ID"
+node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"
+~~~
+
+只有 ID 未保存时才运行一次 `--task-last`。`running` 表示 follow 原任务；已有 terminal 会立即
+返回；`interrupted` 表示原 controller 在 terminal 前结束，返回
+`TASK_EXECUTION_INTERRUPTED`，不能冒充完成或自动重放。`relay.wakeAgent:true` 是宿主继续消费的
+机器信号，`relay.notifyUser:true` 与 deadline 决定何时转述。
+
 ## `OUTCOME_UNKNOWN`、超时或断线
 
 只要动作可能已派发，就不要重试：
@@ -124,7 +142,9 @@ import { createMoneyHand } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
 4. 仅对已核查 ID 调用 `confirmUnknown`；
 5. 需要新动作时使用新 ID。
 
-`actionDispatched:false` 或明确 `ABORTED_NOT_STARTED` 才可能允许修正后重试。postcondition 失败不等于动作没发生。
+基础 task wrapper 只会对 `BUSY`、`NAVIGATION_PREFLIGHT_FAILED`、`PAGE_TRANSITION_BUSY`、
+`TASK_PAGE_UNHEALTHY`、`TASK_TAB_UNHEALTHY` 且明确 `actionDispatched:false` 的错误做一次同页健康
+探针和一次重试。其他错误即使未派发也不进入通用重试；postcondition 失败不等于动作没发生。
 
 `TASK_TIMEOUT` 也不是“动作都没发生”。检查 `taskAcknowledgedAbort`、`cleanupComplete`、
 `controllerReusable`、`taskWindowCleanup` 和业务 checkpoint；只有完成这些检查后才能决定是否
@@ -132,7 +152,7 @@ import { createMoneyHand } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
 
 ## `BUSY`、旧 ref 或 locator 歧义
 
-- `BUSY`：等冲突工作完成，不要并行操作同一 tab/窗口；
+- `BUSY`：基础 wrapper 已在同页健康时最多重试一次；仍失败就停止，不再自行循环；
 - stale boot/ref/snapshot：重新观察和绑定；
 - locator missing/not-ready：有界等待；
 - locator 多匹配：缩小 role/name/CSS，不按数组下标猜；
@@ -142,7 +162,9 @@ import { createMoneyHand } from "./skills/npc-moneyhand/scripts/moneyhand.mjs";
 
 ## 429、503、`Retry-After` 或挑战页
 
-不要直接切到 human 继续翻页。把观察交给 `rateControl`：
+不要直接切到 human 继续翻页。正常 Task Space 高层操作已自动 gate/observe 可识别的
+403/429/503、节流、挑战和账号变化；专项 Skill 再把 `Retry-After`、latency、account 与批次
+checkpoint 交给显式 `rateControl`：
 
 1. checkpoint 当前页、游标和去重集合；
 2. 先降低并发；

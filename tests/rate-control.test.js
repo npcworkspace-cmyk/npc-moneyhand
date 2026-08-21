@@ -423,3 +423,20 @@ test("validation is strict and snapshots cannot mutate internal state", () => {
   assert.equal(brokenRandom.snapshot({ scope: WORK }).consecutive403, 0);
   assert.equal(brokenRandom.snapshot({ scope: WORK }).checkpoint, null);
 });
+
+test("an explicitly clean successful operation is not reclassified by latency heuristics", () => {
+  const controller = createRateController({
+    random: () => 0.5,
+    latencyFloorMs: 100,
+    latencyRegressionFactor: 2,
+  });
+  controller.observe({ scope: WORK, clean: true, latencyMs: 100 });
+  const slowSuccess = controller.observe({
+    scope: WORK,
+    clean: true,
+    latencyMs: 1_000,
+  });
+  assert.deepEqual(slowSuccess.signals, []);
+  assert.equal(slowSuccess.decision.stop, false);
+  assert.notEqual(slowSuccess.decision.phase, "cooldown");
+});

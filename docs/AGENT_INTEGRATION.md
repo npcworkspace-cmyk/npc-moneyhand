@@ -94,6 +94,9 @@ moneyhand --connect [browser options]
 moneyhand --call <extension-method> [--params-json <json>] [browser options]
 moneyhand --once [connection options]
 moneyhand --task <absolute-module.mjs> [--args-json <json>]
+moneyhand --task-last
+moneyhand --task-status <task-execution-id>
+moneyhand --task-follow <task-execution-id>
 moneyhand --stop
 moneyhand --describe
 moneyhand --version
@@ -170,6 +173,10 @@ const moneyhand = createMoneyHand();
 - `inspectTaskBlocker` / `resolveTaskBlocker`：异常时自动聚合有界文字与当前视口，并用高层动作恢复/取消等待；
 - `progress(...)` / `moneyhand.task_progress` / `moneyhand.task_monitor`：任务 checkpoint、硬编码 10 秒
   heartbeat、阻塞监控与 15 秒静默/终态异常截图 watchdog；
+- `taskExecutionId` / 私有 journal / `--task-status|--task-follow`：客户端断开后继续并接回同一个任务；
+- `effectId` / `moneyhand.task_effect_receipt`：同任务内合并相同动作、拒绝冲突并禁止未知结果重放；
+- `moneyhand.task_recovery`：仅对明确未派发的白名单瞬态错误做一次同页探针和一次重试；
+- `taskEvidence` / `completionGate`：终态证据包和不可伪造的完成门；
 - `moneyhand.request`：直接 Extension wire 请求；
 - `createTaskSpace` / `taskRequest`：固定 Profile/tab 并声明 effect；
 - `navigateTaskTab` / `waitForTaskPage`：无盲 sleep 的页面 transition；
@@ -183,7 +190,7 @@ const moneyhand = createMoneyHand();
 
 复制 [disposable-task.mjs](../skills/npc-moneyhand/assets/disposable-task.mjs) 到任务自己的临时或工作目录：
 
-模板已经导出 `run({ moneyhand, signal, args, progress })`，并包含 begin/complete task context、
+模板已经导出 `run({ moneyhand, signal, args, progress, taskExecutionId })`，并包含 begin/complete task context、
 checkpoint 进度与 `finally` 收尾。不要再写一层 wrapper；只替换模板标注的任务逻辑占位。
 
 执行：
@@ -198,6 +205,16 @@ Skill 应分批 checkpoint；超时后读取唯一 `TASK_TIMEOUT` 结果中的 `
 `cleanupComplete`、`taskAcknowledgedAbort`、`controllerReusable` 和 `taskWindowCleanup`。任务包装器
 会把 signal 自动注入浏览器操作和等待，但不会把已经 abort 的 signal 注入最终窗口清理。
 忽略 abort 的任务会令该 controller fail-closed 并退出，不能继续排队复用。
+
+CLI 在调用 controller 前发出 `moneyhand.task_submitted`；适配器必须保存其中的
+`taskExecutionId`。controller 注册后先 journal、再发送每条事件。若客户端 socket 或 Agent
+进程消失，task 命令继续；新客户端只能用相同 ID 运行 `--task-follow`，不得重新执行模块。
+`--task-last` / `--task-status` / `--task-follow` 只读 build-bound 的本机私有 journal，不启动
+Extension 或浏览器。原 controller 已退出且无 terminal 时状态为 `interrupted`。
+
+每条 task progress/recovery/effect/rate/monitor/terminal 事件的 `relay` 给出 `wakeAgent`、
+`notifyUser`、`nextControllerUpdateBy` 和 `nextUserUpdateBy`。适配器必须把 wake 作为继续消费的
+信号，并在 user deadline 前转述需要用户看到的 checkpoint；这不要求另装 scheduler daemon。
 
 `moneyhand --stop` 是公开的维护命令，只会优雅停止固定端口上的内置 controller 及其自有
 资源，不枚举或终止其他 Node 进程。正常任务不需要额外执行它：任务只关闭自己创建的窗口，
@@ -224,6 +241,9 @@ Extension reload、Chrome restart、Profile 替换或明确 handoff 后重新创
 使用 `about:blank#npc-moneyhand-bootstrap=<uuid>`。两者都不会请求外部网站。
 
 Task Space 请求声明 effect，例如 `read-only`、`navigation`、`input`、`download`、`upload`、`send`、`publish`。普通 raw request 不需要 Task Space。
+重放敏感的 Task Space 调用再提供稳定 `effectId`。相同 ID + 相同参数并发或重复时只运行第一份；
+相同 ID + 不同参数返回 `EFFECT_ID_CONFLICT`；未知派发结果保留为 unresolved，不自动重放。
+该 ID 只覆盖一个 `taskExecutionId`，跨任务业务去重仍由专项 Skill 负责。
 
 ## 账号与发布操作
 
@@ -235,7 +255,11 @@ MoneyHand 对 `delete`、`payment`、`publish`、`send`、`upload` 和 `external
 
 `raw` 是默认行为。`human` 只能由 Agent 或专项 Skill 显式设置，并在阶段结束 reset。它不承担限流判断。
 
-批量工作使用 `rateControl` 的 `plan`、`observe`、`checkpoint`、`wait`、`snapshot`、`reset` 动作。scope 至少隔离站点 origin 与 Profile/account。控制器：
+普通 `--task` 在首次高层导航确定 HTTP(S) origin 后，会对高层 Task Space 导航、语义、滚动、
+截图和 `taskRequest` 自动执行 `wait/observe`；发现可识别的 403/429/503、节流、挑战或账号变化后，
+下一动作可在派发前 cooldown 或熔断。批量专项工作仍使用 `rateControl` 的 `plan`、`observe`、
+`checkpoint`、`wait`、`snapshot`、`reset` 补充 account、`Retry-After`、latency 和批次 checkpoint。
+scope 至少隔离站点 origin 与 Profile/account。控制器：
 
 - 从单并发/小批次 pilot 开始；
 - 先降并发，再指数退避并加入 jitter；
@@ -246,9 +270,9 @@ MoneyHand 对 `delete`、`payment`、`publish`、`send`、`upload` 和 `external
 
 checkpoint 属于调用任务；MoneyHand 不内置平台数据库或跨任务采集队列。
 
-rate controller 的执行模型是 `explicit-caller-scheduler`。低层 `request` 不包含可信 rate scope，
-因此不会被透明拦截；集成方负责在每个受控批次前消费 decision，并在批次后 observe。descriptor
-同时声明 `implicitRequestGate:false`，适配器不得把它解释成自动 transport gate。
+rate controller 的执行模型是 `task-runtime-auto-gate-plus-explicit-specialized-scheduler`。
+低层 `request` 不包含可信 rate scope，因此不会被透明拦截；descriptor 同时声明
+`taskRuntimeImplicitGate:true` 与 `implicitRequestGate:false`，适配器不得把它解释成全 transport gate。
 
 ## 专项 Skill 组合
 
@@ -284,6 +308,12 @@ rate controller 的执行模型是 `explicit-caller-scheduler`。低层 `request
 项目没有自动桌面后端。人处理后，Agent 必须重新观察 Profile、boot、tab、URL 和页面状态再继续。
 
 ## 完成语义
+
+任务脚本只有返回 `status:"complete"`（或等价状态）时才强制完成门。它必须同时提供
+`requirements:[{id,satisfied,expected,actual}]` 和领域 evidence。terminal envelope 在 `value`
+之外返回 `taskEvidence` 与 `completionGate`；owned window 清理、最新 effect receipt、rate
+circuit/checkpoint、instruction wait 或任一 requirement 未闭合都会返回
+`TASK_COMPLETION_GATE_FAILED`。专项输出仍由专项 Skill 负责，私有 controller evidence 不是业务数据库。
 
 正常 JSONL 关闭必须同时满足：
 

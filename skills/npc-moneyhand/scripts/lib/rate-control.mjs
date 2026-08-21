@@ -591,7 +591,8 @@ export class AdaptiveRateController {
     if (observation.challenge) signals.push("challenge");
     if (observation.accountChanged) signals.push("account-change");
 
-    const latencyRegression = observation.latencyMs !== undefined
+    const latencyRegression = observation.clean !== true
+      && observation.latencyMs !== undefined
       && existingState?.latencyBaselineMs !== null
       && existingState?.latencyBaselineMs !== undefined
       && observation.latencyMs >= this.config.latencyFloorMs

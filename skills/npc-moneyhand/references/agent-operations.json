@@ -2415,6 +2415,7 @@
           "files",
           "options",
           "text",
+          "value",
           "replace",
           "key",
           "code",
@@ -2629,6 +2630,7 @@
             "minLength": 1,
             "maxLength": 12000
           },
+          "value": {},
           "replace": {
             "type": "boolean"
           },
@@ -2973,6 +2975,7 @@
           "deltaY",
           "options",
           "text",
+          "value",
           "replace",
           "key",
           "code",
@@ -3324,6 +3327,7 @@
             "minLength": 1,
             "maxLength": 12000
           },
+          "value": {},
           "replace": {
             "type": "boolean"
           },

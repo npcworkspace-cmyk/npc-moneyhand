@@ -23,7 +23,9 @@ MoneyHand owns:
   handshake, command serialization, and idle shutdown;
 - Profile, boot, tab, Task Space, request-ID, and unknown-outcome identity;
 - raw/human behavior, semantic snapshots, guarded browser actions, and behavior reset;
-- optional caller-owned approval records, effect labels, adaptive rate state, and explicit cooldown waits;
+- per-task effect receipts, fixed recovery, automatic high-level rate gates, adaptive rate state, and
+  explicit specialized-scheduler controls;
+- private task journaling/reattachment, standard evidence, completion gating, and Agent/user relay fields;
 - neutral browser evidence and bounded failure states, not platform or business interpretation.
 
 The specialized Skill owns:
@@ -58,9 +60,12 @@ A specialized Skill must:
 - use an injected task-owned controller or a single standalone wrapper, never both;
 - create a Task Space for dependent multi-step work and pin exact `instanceId + bootId`;
 - classify every action effect, including `read-only`, before calling `taskRequest` or a guarded action;
+- assign a stable `effectId` to each replay-sensitive navigation/input/upload/download/external-write
+  step and a domain idempotency key for the same action across separate task executions;
 - consult `rateControl` before every governed batch and report observations after that batch;
 - pilot before scale, checkpoint before cooldown, and stop on challenge or account-state change;
 - prove exact completion or return a bounded incomplete result with counts, reason, and checkpoint;
+  every complete claim must include `{id,satisfied,expected,actual}` requirements and bounded evidence;
 - inspect real page/business state before retrying any `OUTCOME_UNKNOWN` operation;
 - preserve the base Skill's structured-data-first successful path and its automatic visual fallback
   for page anomalies or silent tasks; do not implement another screenshot/retry loop.
@@ -136,7 +141,7 @@ The preferred controller surface is:
 Prefer an injected ESM function for reusable domain logic:
 
 ```js
-export async function run({ moneyhand, signal, args, progress }) {
+export async function run({ moneyhand, signal, args, progress, taskExecutionId }) {
   await progress({ phase: "start", message: "Specialized workflow started" });
   // Copy assets/specialized-task.mjs, then replace only its domain-workflow placeholder.
 }
@@ -164,16 +169,20 @@ the task-owned controller.
 3. Validate domain scope and exact-count gates before the first browser dispatch.
 4. Reuse the injected bundled controller, select the intended current Profile once, and create the
    dedicated task window.
-5. Create a Task Space and rate scope; run the smallest representative pilot.
-6. Execute bounded batches, obey decisions, report observations, and persist domain checkpoints.
+5. Create a Task Space; let the base runtime gate high-level operations, and create an explicit account
+   rate scope when the specialized workflow has richer batch signals; run the smallest representative pilot.
+6. Execute bounded batches with stable effect IDs, obey decisions, report observations, persist domain
+   checkpoints, and declare completion requirements.
 7. Stop globally on challenge, account change, repeated minimum-rate throttling, or unknown outcome.
 8. Reset temporary behavior, close the exact task-owned window, complete the Task Space, and drain
    JSONL when used. Only a custom in-process adapter stops its own controller instance.
 
-On disconnect after dispatch, inspect and checkpoint within the same task when possible, then return
-`OUTCOME_UNKNOWN`; do not detach, remove, confirm, or replay automatically. The base lifecycle still
-closes the exact task-owned window in `finally`. If cleanup or `completeTaskSpace` fails, keep that
-lifecycle failure in the result instead of hiding it behind the domain outcome.
+On a browser/Extension disconnect after dispatch, inspect and checkpoint within the same task when
+possible, then return `OUTCOME_UNKNOWN`; do not confirm or replay automatically. On an Agent command
+client disconnect, do not submit a replacement task: reattach to the same `taskExecutionId` with the
+base `--task-follow` flow. The resident task keeps its exact Task Space and still closes the owned
+window in `finally`. If cleanup or `completeTaskSpace` fails, keep that lifecycle failure in the result
+instead of hiding it behind the domain outcome.
 
 ## Packaging boundary
 
@@ -199,9 +208,13 @@ Require all applicable checks before calling a specialized Skill portable or pro
 - Required operations/wire methods validate against the packaged MoneyHand descriptor.
 - Multi-step work creates and completes one Task Space pinned to exact Profile boot identity.
 - Each governed batch calls rate plan before dispatch and observe afterward; human mode cannot bypass it.
+- Every replay-sensitive action has a stable per-execution `effectId`; a duplicate dispatch fixture
+  produces one action, and an unknown receipt is never replayed or marked complete.
 - 429/503, `Retry-After`, challenge, account change, and latency regression have bounded fixtures.
 - High-impact effects dispatch without a mandatory MoneyHand approval token.
 - Exact-scope mismatch fails before browser dispatch; partial output cannot be labeled complete.
+- A nominal complete result with one unsatisfied requirement fails the base completion gate after cleanup.
+- An attached-client loss test reattaches to the same journaled task and observes one original terminal.
 - Post-dispatch disconnect produces one unknown outcome and zero automatic action retries; the base
   lifecycle still closes only its exact task-owned window.
 - Shutdown drains results and reaches `moneyhand.stopped`; injected mode leaves lifecycle to its owner.

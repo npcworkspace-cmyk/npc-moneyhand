@@ -3,8 +3,10 @@
 Zero-runtime-dependency MoneyHand Agent Skill with an embedded browser controller. It pairs with
 the npc-moneyhand Chrome extension over a loopback WebSocket and does not require a daemon.
 
-The Skill owns controller startup, task-scoped JSONL/ESM orchestration, semantic browser actions,
-raw and human behavior modes, adaptive rate control, checkpoints, and bounded recovery. The Chrome
+The Skill owns controller startup, durable task IDs and reattachment, task-scoped JSONL/ESM
+orchestration, semantic browser actions, raw and human behavior modes, idempotent effect receipts,
+automatic and explicit adaptive rate control, checkpoints, bounded recovery, and evidence-gated
+completion. The Chrome
 extension remains the thin execution hand.
 
 ## Install a release tarball

@@ -373,7 +373,14 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     outcome = {
       status: "complete",
       reason: null,
+      total: CHECK_TOTAL,
       checks,
+      requirements: checks.map((check) => ({
+        id: `acceptance:${check.name}`,
+        satisfied: check.status === "passed",
+        expected: "passed",
+        actual: check.status,
+      })),
       evidence,
     };
   } catch (error) {
@@ -385,6 +392,7 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     outcome = {
       status: "incomplete",
       reason: failure.code,
+      total: CHECK_TOTAL,
       error: failure,
       checks,
       evidence: visualFallback?.captured

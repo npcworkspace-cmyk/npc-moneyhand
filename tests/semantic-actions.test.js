@@ -534,6 +534,39 @@ test("semantic select resolves exact value, label, or index descriptors and veri
   }).result.reason, "multiple-required");
 });
 
+test("semantic type and select accept value aliases but reject ambiguous fields", () => {
+  assert.deepEqual(normalizeSemanticRefAction({ action: "type", value: "hello" }), {
+    action: "type",
+    text: "hello",
+    replace: false,
+    verification: {
+      kind: "target-text-inserted",
+      timeoutMs: 2_000,
+      pollIntervalMs: 100,
+      value: "hello",
+      replace: false,
+    },
+  });
+  assert.deepEqual(normalizeSemanticRefAction({ action: "select", value: "B" }), {
+    action: "select",
+    options: [{ value: "B" }],
+    verification: {
+      kind: "target-options-selected",
+      timeoutMs: 2_000,
+      pollIntervalMs: 100,
+      value: [{ value: "B" }],
+    },
+  });
+  assert.throws(
+    () => normalizeSemanticRefAction({ action: "type", text: "a", value: "b" }),
+    (error) => error?.code === "INVALID_SEMANTIC_ACTION",
+  );
+  assert.throws(
+    () => normalizeSemanticRefAction({ action: "select", options: ["A"], value: "B" }),
+    (error) => error?.code === "INVALID_SEMANTIC_ACTION",
+  );
+});
+
 test("semantic check and uncheck normalize to binary idempotent postconditions", () => {
   const check = normalizeSemanticRefAction({ action: "check" });
   const uncheck = normalizeSemanticRefAction({

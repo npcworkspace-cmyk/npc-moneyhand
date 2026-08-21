@@ -43,11 +43,13 @@ with `value.status: connected` means that MoneyHand connected.
 
 ### `status: connected`
 
-The returned acceptance checklist has passed and `nextAction` is `ready_for_tasks`. Send the returned
-`userMessage` as the connection result. Then use this fixed routing rule:
+The returned acceptance checklist has passed, `nextAction` is `ready_for_tasks`, and `taskRouting`
+is the machine-readable routing rule. Send the returned `userMessage` as the connection result. Then
+use this fixed routing rule:
 
 - If the current conversation already contains one concrete browser task, continue with that task
-  immediately. Do not ask the user to repeat or reconfirm the same task.
+  immediately. Do not ask the user to repeat or reconfirm the same task. Ending the Agent turn after
+  connection in this case is a task failure.
 - If no concrete browser task has been supplied yet, stop and ask the user what to do.
 
 Do not run another smoke test or visit a public site merely to test the connection.
@@ -86,7 +88,9 @@ Never run another automatic retry after this command.
 
 ### `status: blocked`
 
-Send the returned `userMessage` and stop. Do not repair, replace, or bypass the connection path.
+Send the returned `userMessage` and stop. Do not repair, replace, or bypass the connection path. A
+terminal blocked result automatically stops the bundled controller after delivering the result, so
+the Agent must not run an additional `--stop`, inspect listeners, or invent cleanup commands.
 
 ## Startup prohibitions
 
@@ -109,6 +113,10 @@ stop instead of inventing an alternative installation.
 
 Read `references/task-runtime.md` before writing or running task logic. It is the short, single normal
 task path and contains copyable argument shapes. Do not preload recovery or full API references.
+Never run `assets/disposable-task.mjs`, `assets/specialized-task.mjs`, or an unchanged copy. Copy the
+appropriate template to a task-owned temporary path, replace its placeholder with the concrete task,
+and remove the `MONEYHAND_TASK_TEMPLATE` sentinel before `--task`. The controller rejects an unchanged
+template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch; implement it instead of retrying.
 MoneyHand selects the latest focused connected Profile once, opens one dedicated task window in
 that Profile, pins it under a generated `taskId`, and closes that exact window in cleanup. The Agent
 must never enumerate or guess tab/window IDs. A later focus change is not permission to retarget. If
@@ -122,6 +130,8 @@ external website.
 MoneyHand's core task capabilities are:
 
 - one-time Profile selection plus an automatically created, task-owned browser window;
+- zero-dependency Worker isolation for Agent-authored task modules; timeout or shutdown terminates an
+  unresponsive module and its task-owned Node handles before controller/window cleanup;
 - automatic exact-window cleanup after success, failure, abort, or a task module that forgot cleanup;
 - automatic cleanup of the exact unchanged browser-launch bootstrap tab after the task, without
   touching pre-existing or user-modified tabs/windows;
@@ -134,13 +144,25 @@ MoneyHand's core task capabilities are:
 - mandatory streamed task progress, including a 10-second heartbeat and a screenshot after 15 seconds
   without new task activity, even when task code forgot to report progress; neither threshold can be
   relaxed by task or adapter code;
-- an attached-client `moneyhand.task_monitor` wake event when task code blocks the controller event
-  loop, followed by a current-page screenshot before cleanup as soon as the controller recovers;
+- one private, build-bound task journal keyed by `taskExecutionId`; losing an Agent command socket does
+  not cancel the resident task, and a replacement Agent can query or follow that exact execution;
+- per-task idempotency receipts for caller-supplied `effectId` values, including concurrent duplicate
+  collapse, conflict rejection, and permanent no-replay treatment for unknown outcomes;
+- a fixed recovery classifier: only a proven-not-dispatched transient may receive one same-page probe
+  and one retry; stale/occluded targets are refreshed and dispatched/unknown actions are only inspected;
+- task code cannot block the controller event loop because it runs in an isolated Worker; the normal
+  heartbeat and screenshot watchdog remain live during synchronous task code. The attached client can
+  still emit `moneyhand.task_monitor` if the controller or output transport itself stops reporting;
 - an atomic cleanup barrier that pauses and drains the screenshot watchdog before task-window removal,
   so observation and cleanup cannot race;
 - stable deliberate viewport screenshots that throw on capture failure, plus observation-only full-page
-  screenshots;
-- adaptive caller-scheduled rate decisions and honest complete/incomplete/unknown outcomes;
+  screenshots; both successful helpers return the exact written PNG as top-level `path`; a path/byte count proves transport only, so task evidence must be opened and checked for a task-specific visible sentinel;
+- automatic origin/Profile-scoped rate gating for high-level Task Space operations, plus the detailed
+  explicit scheduler available to specialized Skills;
+- a standard private evidence bundle and a completion gate that rejects a claimed `complete` result
+  while cleanup, effect outcomes, rate state, instruction state, or declared requirements are unresolved;
+- machine-readable relay fields on progress, recovery, effect, rate, monitor, and terminal events so an
+  Agent host can wake itself and decide which checkpoints must also be shown to the user;
 - one shared controller beneath independently distributed specialized Skills.
 
 Normal task code receives `progress({phase,message,current,total,checkpoint})`; use it at every bounded
@@ -153,14 +175,20 @@ never search for `tabId` or `waitId`. Automatic images are local-sensitive tempo
 must not be pasted into remote/shared logs without user authorization.
 
 Run every `--task` as one foreground-attached command and keep consuming its stdout until the terminal
-`id:"task"` result. Never detach, background, fire-and-forget, or end the Agent turn while it is
-running. If the host returns a process/session handle, immediately use that host's wait or continuation
-operation at intervals no longer than 30 seconds until completion. Treat `moneyhand.task_progress` and
-`moneyhand.task_monitor` as host wake signals: surface meaningful checkpoints and every visual/error
-event immediately, and
-give the user a concise still-running update at least every 30 seconds when only heartbeats arrive.
-The controller cannot invoke an arbitrary Agent host's scheduler by itself; a host that cannot retain
-or resume an attached local command cannot claim unattended long-task support.
+`id:"task"` result. Record the `taskExecutionId` from `moneyhand.task_submitted`. Never detach, background, fire-and-forget,
+or end the Agent turn while it is running. If the host returns a
+process/session handle, immediately use that host's wait or continuation operation at intervals no
+longer than 30 seconds until completion. Treat `relay.wakeAgent:true` on task progress, monitor,
+recovery, rate, effect, and terminal events as a host wake signal; show checkpoints and every
+visual/error event immediately, and give the user a concise still-running update at least every 30
+seconds when only heartbeats arrive.
+
+If the attached command or Agent process is lost unexpectedly, do not submit the task again. Run
+`node scripts/moneyhand.mjs --task-last` only when the execution ID was not retained, then run exactly
+`node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"` and consume that stream to its terminal
+result. Use `--task-status "TASK_EXECUTION_ID"` for a one-shot status read. These commands read the
+private journal and do not start another browser task. The controller cannot create a turn inside an
+arbitrary Agent host by itself; the host must consume the relay/attached stream.
 
 Read `references/task-recovery.md` only after a task timeout, controller/page-health failure, unknown
 outcome, cleanup failure, or visual blocker requires a recovery decision.

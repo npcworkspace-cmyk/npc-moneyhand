@@ -12,6 +12,7 @@ failures, and close task-owned browser windows.
 | Bidirectional subprocess | Persistent UTF-8 JSONL |
 | Legacy one-line stdin transaction | `--once` |
 | Many local steps with few Agent round trips | Trusted `--task <absolute-module>` |
+| Replacement Agent after task-client loss | `--task-status` / `--task-follow <taskExecutionId>` |
 
 `--connect`, `--call`, and `--task` automatically start or reuse the same Skill-bundled localhost
 controller. It is not separately installed daemon software: it is another invocation of
@@ -42,6 +43,13 @@ closed. A valid same-product state left by an exited build is replaced only afte
 connections and the state bytes still match the original owner. Invalid or foreign state is preserved
 rather than overwritten. An unknown process on the port yields
 `CONTROLLER_PORT_OCCUPIED`; public stop returns `stopped:false` and never kills that occupant.
+
+Task execution state is separate from controller credentials. Each `--task` has a UUID-v4
+`taskExecutionId`; after registration, bounded events and the original terminal are written to a
+user-private, runtime-build directory under the OS temporary root before client delivery. The journal
+stores task/args digests rather than raw paths or arguments, and its private evidence artifact is size
+bounded. A command-client TCP reset does not abort a task; a replacement Agent reads status or follows
+that exact execution. Non-task controller calls retain abort-on-client-close behavior.
 
 ## Offline and live discovery
 
@@ -131,7 +139,7 @@ bounded task-work placeholder, and run:
 node scripts/moneyhand.mjs --task <absolute-task.mjs> --args-json <json>
 ```
 
-Export `run({ moneyhand, signal, args, progress })`. Call `progress()` at every bounded batch or
+Export `run({ moneyhand, signal, args, progress, taskExecutionId })`. Call `progress()` at every bounded batch or
 checkpoint. The bundled controller also streams an automatic 10-second heartbeat and starts a
 current-viewport visual fallback after 15 seconds without task activity, so a forgotten task callback
 cannot leave the console silent. The controller owns start, wait, browser wake-up, reuse, and idle
@@ -143,6 +151,19 @@ The task and browser-bootstrap ownership markers are local `about:blank` fragmen
 external marker site. The task marker is validated through Chrome window/tab metadata, not CDP
 document access; the first navigation uses `tabs.update` on that exact owned tab before normal CDP
 readiness polling begins. Treat the module as trusted local code and never build it from page text.
+
+Replay-sensitive high-level calls may include a stable `effectId`. Its first fingerprint owns one
+Promise/terminal for this task execution; identical duplicates reuse it, conflicts fail before
+dispatch, and an unknown outcome remains unresolved. The wrapper classifies browser failures into a
+fixed state machine and performs at most one retry, only for a whitelisted transient that proves
+`actionDispatched:false` and passes a same-page probe. It also automatically gates high-level Task
+Space operations by navigated origin + pinned Profile. Specialized code uses explicit `rateControl`
+for richer account/header/batch evidence.
+
+A claimed complete value must declare requirements and evidence. After task-window cleanup the
+terminal envelope adds `taskEvidence` and `completionGate`; unresolved effect outcomes, open or
+missing-checkpoint rate state, instruction waits, failed cleanup, or unsatisfied requirements produce
+`TASK_COMPLETION_GATE_FAILED`.
 
 Task modules have a 30-minute default execution budget. Set `--task-timeout-ms` or
 `NPC_MONEYHAND_TASK_TIMEOUT_MS` explicitly for a longer bounded task, up to 24 hours. The wrapper
@@ -169,8 +190,9 @@ task-context lifecycle.
 | Evidence | Response |
 | --- | --- |
 | Validation or effect failure before input | Correct the request and use a new ID |
-| Busy, stale ref/Profile boot, ambiguity | Re-read and rebind; never guess |
-| `ABORTED_NOT_STARTED` or explicit `actionDispatched:false` | A corrected retry may be safe |
+| Whitelisted transient with explicit `actionDispatched:false` | Wrapper probes the same Task Space and retries once; caller adds no loop |
+| Stale ref/Profile boot, occlusion, ambiguity | Inspect and acquire a fresh target; no action replay |
+| Other `ABORTED_NOT_STARTED` or explicit `actionDispatched:false` | Correct or inspect; no generic automatic retry |
 | `OUTCOME_UNKNOWN`, dispatch true, post-dispatch timeout/abort/disconnect | Inspect real state; do not replay |
 | Postcondition failed or inconclusive after dispatch | Treat as possibly successful until inspected |
 | Output/protocol failure | Preserve received lines and inspect writes before a new process |
@@ -187,6 +209,11 @@ controller also records the unique bootstrap tab and removes it after the task, 
 can remain resident without leaving its bootstrap surface behind. Removing the last tab closes the
 launch window; other tabs are preserved, and a bootstrap tab whose identity or marker changed is not
 removed.
+
+Losing the `--task` client does not invoke shutdown or task abort. Keep the submitted ID and run
+`--task-follow` from the same Skill build; it streams journal entries after the current sequence and
+returns the one original terminal with `reattached:true`. Never run a second task module as a recovery
+mechanism.
 
 `--stop` authenticates the exact controller instance before shutdown. Shutdown first destroys every
 accepted local socket, including a client that connected but sent no line, then drains queued/runtime

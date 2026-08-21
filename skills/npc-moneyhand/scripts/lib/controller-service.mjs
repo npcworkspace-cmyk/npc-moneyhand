@@ -455,7 +455,27 @@ async function writeLine(socket, value) {
   }
   const line = `${JSON.stringify(value)}\n`;
   if (socket.write(line, "utf8")) return;
-  await once(socket, "drain");
+  await new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => {
+      socket.off("drain", onDrain);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    const finish = (callback, value) => {
+      cleanup();
+      callback(value);
+    };
+    const onDrain = () => finish(resolvePromise);
+    const onError = (error) => finish(rejectPromise, error);
+    const onClose = () => finish(
+      rejectPromise,
+      new ControllerServiceError("CONTROLLER_CLIENT_CLOSED", "Controller client connection closed"),
+    );
+    socket.once("drain", onDrain);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    if (socket.destroyed || socket.writable === false) onClose();
+  });
 }
 
 function readOneLine(socket, options = {}) {
@@ -533,6 +553,7 @@ class ControllerService extends EventEmitter {
     this.stateWritten = false;
     this.closed = false;
     this.stopping = false;
+    this.shutdownPending = false;
     this.active = 0;
     this.activeController = undefined;
     this.queue = Promise.resolve();
@@ -610,6 +631,11 @@ class ControllerService extends EventEmitter {
   #accept(socket) {
     socket.setNoDelay(true);
     this.sockets.add(socket);
+    // A caller may disappear with a TCP reset (process crash, tool timeout, or
+    // Agent restart). The command lifecycle is driven by `close`; consuming the
+    // transport error here keeps that client failure from terminating the
+    // resident controller process.
+    socket.on("error", (error) => this.emit("clientError", error));
     socket.once("close", () => this.sockets.delete(socket));
     this.#readRequest(socket).catch(async (error) => {
       if (!socket.destroyed) {
@@ -652,6 +678,7 @@ class ControllerService extends EventEmitter {
     }
     if (request.command === "shutdown") {
       this.stopping = true;
+      this.shutdownPending = true;
       clearTimeout(this.idleTimer);
       this.activeController?.abort(new ControllerServiceError(
         "CONTROLLER_SHUTDOWN",
@@ -668,13 +695,38 @@ class ControllerService extends EventEmitter {
     this.active += 1;
     const controller = new AbortController();
     if (request.command !== "shutdown") this.activeController = controller;
+    const survivesClientClose = request.command === "task";
     let completed = false;
     let stopAfterComplete = false;
     const abortOnClose = () => {
-      if (!completed) controller.abort(new ControllerServiceError(
+      if (!completed && !survivesClientClose) controller.abort(new ControllerServiceError(
         "CONTROLLER_CLIENT_CLOSED",
         "Controller client disconnected before command completion",
       ));
+    };
+    const respond = async (envelope) => {
+      if (socket.destroyed || socket.writable === false) {
+        if (survivesClientClose) return false;
+        throw new ControllerServiceError(
+          "CONTROLLER_CLIENT_CLOSED",
+          "Controller client disconnected before command completion",
+        );
+      }
+      try {
+        await writeLine(socket, envelope);
+        return true;
+      } catch (error) {
+        if (survivesClientClose && [
+          "CONTROLLER_CLIENT_CLOSED",
+          "ECONNRESET",
+          "EPIPE",
+          "ERR_STREAM_DESTROYED",
+          "ERR_STREAM_WRITE_AFTER_END",
+        ].includes(error?.code)) {
+          return false;
+        }
+        throw error;
+      }
     };
     socket.once("close", abortOnClose);
     try {
@@ -686,7 +738,7 @@ class ControllerService extends EventEmitter {
       }
       if (request.command === "shutdown") {
         await this.#stopRuntime();
-        await writeLine(socket, this.#envelope("message", id, {
+        await respond(this.#envelope("message", id, {
           message: { type: "result", id: "shutdown", ok: true, value: { stopped: true } },
         }));
       } else {
@@ -698,30 +750,34 @@ class ControllerService extends EventEmitter {
             this.stopping = true;
             clearTimeout(this.idleTimer);
           },
-          send: async (message) => writeLine(socket, this.#envelope("message", id, {
+          send: async (message) => respond(this.#envelope("message", id, {
             message,
           })),
         });
       }
-      await writeLine(socket, this.#envelope("complete", id, {
+      await respond(this.#envelope("complete", id, {
         ok: true,
         value: this.status(),
       }));
     } catch (error) {
-      await writeLine(socket, this.#envelope("complete", id, {
+      await respond(this.#envelope("complete", id, {
         ok: false,
         error: normalizedError(error),
       })).catch(() => {});
     } finally {
       completed = true;
       socket.off("close", abortOnClose);
-      socket.end();
+      if (!socket.destroyed) socket.end();
       this.active -= 1;
       if (this.activeController === controller) this.activeController = undefined;
-      if (request.command === "shutdown" || stopAfterComplete) {
+      if (request.command === "shutdown") {
+        this.shutdownPending = false;
         setImmediate(() => this.stop().catch((error) => this.emit("error", error)));
       }
-      else this.#armIdleTimer();
+      else if (stopAfterComplete && !this.shutdownPending) {
+        setImmediate(() => this.stop().catch((error) => this.emit("error", error)));
+      }
+      else if (!this.shutdownPending) this.#armIdleTimer();
     }
   }
 

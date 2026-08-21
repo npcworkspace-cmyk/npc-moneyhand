@@ -81,7 +81,19 @@ node scripts/moneyhand.mjs --connect --after-user-action
 `moneyhand.task_monitor`，控制器恢复后会在清理前补截图。宿主若返回进程/session 句柄，Agent
 必须每 30 秒以内继续等待该句柄直到终态；重要
 checkpoint、截图或错误立即转述，只有 heartbeat 时也至少每 30 秒告诉用户任务仍在运行。控制器
-不能跨产品直接调用任意 Agent 的调度器，因此无法保留/恢复前台命令的宿主不支持无人值守长任务。
+返回的每类任务事件都带 `relay.wakeAgent`、`relay.notifyUser` 和下次反馈期限；宿主应据此唤醒
+Agent 并转述进度。
+
+启动时必须记录 `moneyhand.task_submitted.taskExecutionId`。如果 Agent、终端或命令句柄意外断开，
+常驻控制器继续原任务并先写私有 journal；不得再次提交同一任务。用
+`node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"` 接回原流；只查一次状态用
+`--task-status`，ID 丢失才运行一次 `--task-last`。控制器不能跨产品主动新建 Agent 回合，因此
+宿主仍需消费附着流或 follow 流，但不再因为一次客户端断开而丢失任务。
+
+正常高层 Task Space 操作会自动执行站点 origin + 固定 Profile 的限流 gate；同一任务内的
+写入/导航等可用稳定 `effectId` 防止重复派发。终态会返回私有 `taskEvidence` 与
+`completionGate`；只要清理、幂等结果、rate circuit、等待指令或声明的 requirements 未闭合，
+即使任务脚本写了 `complete` 也会被拒绝。
 
 任务窗口和自动拉起浏览器时的唯一引导标签都只使用 `about:blank` fragment 作为所有权标记，
 不会为了创建标记而访问外部网站。

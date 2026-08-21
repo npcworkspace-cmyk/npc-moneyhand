@@ -43,6 +43,8 @@ MoneyHand turns that repeated work into durable infrastructure:
 - **Turn recurring work into a capability**: encode scope, fields, batches, checkpoints, and completion evidence in a Custom Skill.
 - **Make uncertainty explicit**: disconnects, timeouts, and unknown outcomes remain visible states;
   visible-page anomalies automatically carry the current viewport for inspection before any retry.
+- **Keep long tasks alive across Agent handles**: each task has a private journal and
+  `taskExecutionId`; a replacement Agent follows the same resident execution instead of resubmitting it.
 - **Stay local, lightweight, and portable**: the bundled controller starts on first use and exits when idle; there is no separately installed daemon, system service, Native Host, remote browser backend, or external runtime package.
 - **Stay resident without mixing builds**: controller reuse is bound to version, the complete runtime
   build, PID, process nonce, and a private local proof. Identical Skill bytes installed under different
@@ -95,7 +97,11 @@ The base Skill implements the infrastructure that browser agents otherwise rebui
   `needs_instruction`;
 - stable viewport screenshots with input mapping, plus observation-only full-page screenshots;
 - a bounded page-health probe that never silently switches Profile or account mid-task;
-- direct account actions, unknown-outcome recovery, checkpoints, and optional adaptive rate control;
+- client-loss reattachment, per-task idempotent `effectId` receipts, a fixed recovery machine, and
+  Agent/user progress relay fields;
+- automatic high-level rate gates, a private evidence bundle, and a completion gate that rejects
+  unsupported success claims;
+- direct account actions, unknown-outcome recovery, and checkpoints;
 - ESM, UTF-8 JSONL, CLI, and trusted local task-module entry points.
 
 An agent reads one capability contract and calls it instead of inventing another control stack.
@@ -141,7 +147,10 @@ Human-like behavior does not bypass CAPTCHA, account controls, website rules, or
 
 ### 5. Rate limits and uncertainty are first-class states
 
-Batch work is not blind acceleration. A Custom Skill can feed status codes, `Retry-After`, latency, challenge, and account-state signals to the shared rate controller. The controller returns concurrency, interval, wait, cooldown, or stop decisions. An unknown outcome preserves the live state instead of replaying an action that may already have succeeded.
+Batch work is not blind acceleration. Normal high-level tasks are automatically rate-gated by site
+origin and pinned Profile. A Custom Skill can add `Retry-After`, latency, challenge, account state,
+and durable batch checkpoints to the shared scheduler. An unknown `effectId` outcome is not replayed,
+and a claimed completion must pass cleanup, receipt, rate-state, and declared-requirement evidence.
 
 ### 6. One browser foundation for different agents
 
@@ -158,7 +167,8 @@ For Chromium page targets, MoneyHand provides:
 - raw CDP, CDP Input, allowlisted Chrome APIs, and single-tab batches of up to 200 steps;
 - multiple Profile connections, recent-focus routing, and exact multi-step task pinning;
 - agent-selected human behavior, automatic exception screenshots, and human-takeover boundaries;
-- direct account actions, activity evidence, recovery, adaptive rate control, and checkpoints.
+- direct account actions, client-loss reattachment, idempotent receipts, fixed recovery, automatic
+  rate control, evidence-based completion, and checkpoints.
 
 Browser chrome, native save or print windows, operating-system authentication, desktop applications, and CAPTCHA are outside the web-page execution surface. MoneyHand does not treat technical visibility in the browser as authorization to use data.
 

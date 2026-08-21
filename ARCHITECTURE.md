@@ -7,7 +7,7 @@
 ~~~text
 Agent planning / custom action Skill
                  │
-                 │ calls one task-owned controller
+                 │ reuses one bundled resident controller
                  ▼
 skills/npc-moneyhand
   ├─ SKILL.md
@@ -16,7 +16,8 @@ skills/npc-moneyhand
   ├─ Task Spaces and page transitions
   ├─ semantic snapshots / locators / guarded actions
   ├─ optional caller policy / unknown-outcome recovery
-  └─ adaptive rate controller
+  ├─ durable task journal / effect receipts / completion gate
+  └─ automatic + explicit adaptive rate controller
                  │ npc-moneyhand/2 over loopback WS
                  ▼
 extension
@@ -42,7 +43,9 @@ Real Chrome Profile
 
 `moneyhand` 是唯一正式 CLI。Skill 的控制协议为 `npc-moneyhand-control/1`；Extension wire 为 `npc-moneyhand/2`。JSONL 正常生命周期事件为 `moneyhand.listening` 和 `moneyhand.stopped`。
 
-项目不安装 daemon、服务、Native Host 或跨任务常驻进程。每个 Agent 任务创建一个 controller，在 `finally` 或 JSONL shutdown 闭环中回收。
+项目不安装独立 daemon、系统服务或 Native Host。Skill 首次命令自动启动同一份
+`moneyhand.mjs` 作为 loopback resident controller，跨任务复用并在空闲 15 分钟后退出；每个任务
+只拥有自己的 Task Space、窗口、journal 和 cleanup，不拥有第二个 controller。
 
 ## 文件边界
 
@@ -53,6 +56,11 @@ Real Chrome Profile
 | `skills/npc-moneyhand/scripts/lib/browser-launch.mjs` | 复用在线会话或自动打开已安装 MoneyHand 的 Chromium Profile |
 | `skills/npc-moneyhand/scripts/lib/peer.mjs` | loopback WebSocket Peer 和会话管理 |
 | `skills/npc-moneyhand/scripts/lib/task-spaces.mjs` | 精确 Profile/tab 所有权和任务绑定 |
+| `skills/npc-moneyhand/scripts/lib/controller-service.mjs` | 私有凭据保护的 resident controller、串行命令与客户端断线隔离 |
+| `skills/npc-moneyhand/scripts/lib/task-ledger.mjs` | build-bound 私有任务 journal、状态查询与断线接管 |
+| `skills/npc-moneyhand/scripts/lib/task-effects.mjs` | per-task `effectId` 幂等收据与未知结果禁止重放 |
+| `skills/npc-moneyhand/scripts/lib/task-recovery-state.mjs` | 固定恢复分类、同页探针与唯一安全重试 |
+| `skills/npc-moneyhand/scripts/lib/task-evidence.mjs` | 标准证据包与完成门 |
 | `skills/npc-moneyhand/scripts/lib/page-transitions.mjs` | 单次导航、稳定 readiness 和结果未知语义 |
 | `skills/npc-moneyhand/scripts/lib/semantic-*.mjs` | 有界语义快照、稳定 locator 和受守卫动作 |
 | `skills/npc-moneyhand/scripts/lib/task-approvals.mjs` | 可选的调用方一次性决策记录；不是发布/发送/上传门禁 |
@@ -74,22 +82,21 @@ Real Chrome Profile
 
 ~~~text
 Agent task starts
-  → `--connect` or create/start one MoneyHand controller
-  → bind loopback endpoint
-  → moneyhand.listening
+  → ensure/reuse the bundled controller on 127.0.0.1:19845
+  → controller owns/reuses the Extension endpoint on 127.0.0.1:19846
   → reuse a live Extension or open its installed Chromium Profile
   → Extension completes npc-moneyhand/2 handshake
   → wait for compatible session
+  → register taskExecutionId and private journal
   → create Task Space for dependent work
   → execute raw/human browser phases
-  → inspect unknown outcomes and checkpoint rate state
-  → drain
-  → shutdown/stop
-  → moneyhand.stopped
-  → stdout EOF or ESM finally complete
+  → auto-gate rate state, journal progress/effects/recovery, inspect unknown outcomes
+  → build evidence and enforce completion gate
+  → close the exact task window
+  → return terminal; controller remains until idle or explicit --stop
 ~~~
 
-一个端口属于一个 Agent 任务。多个 Chrome Profile 可以连接同一 controller；默认目标按当前焦点、持久化的最后焦点时间和稳定 session 顺序选择。多步任务必须使用 Task Space 固定 `instanceId + bootId`，防止中途焦点变化改写目标。
+一个固定 controller 端口属于同一 runtime build，不属于单个 Agent 任务。多个 Chrome Profile 可以连接同一 controller；默认目标按当前焦点、持久化的最后焦点时间和稳定 session 顺序选择。多步任务必须使用 Task Space 固定 `instanceId + bootId`，防止中途焦点变化改写目标。
 
 Extension 主动连接 Skill listener。`--connect`、`--call` 和 `--task` 会先复用在线会话；短时未连上时，自动打开本机已安装 MoneyHand 的 Chromium Profile，但不关闭或重启现有浏览器。未安装扩展时仍需用户手动加载 Release ZIP；Chromium 不允许 Skill 静默安装 unpacked Extension。
 
@@ -109,6 +116,10 @@ Task Space ID、JSONL command ID 和 wire request ID 是不同标识，不得互
 ## 调度和结果语义
 
 Extension 对同一 tab/target 顺序执行，对不同目标并行。全局/窗口独占操作与冲突工作 fail closed。最近终态有界缓存只用于短期重复帧保护，不能把旧 ID 当成永久幂等键。
+
+可信 task wrapper 另外提供 task-execution 内的 `effectId` 收据：相同 fingerprint 的并发或后来
+重复调用复用第一份 Promise/result；冲突 ID 在派发前失败；已派发或未知结果永不自动重放。跨
+`taskExecutionId` 的业务幂等仍由专属 Skill 负责。
 
 已派发动作在超时、abort 或断线后可能返回 `OUTCOME_UNKNOWN`：
 
@@ -158,9 +169,22 @@ circuit-open → checkpoint + Agent/human decision
 
 先降并发，再增加带 jitter 的间隔；只有连续干净的小批次才逐步恢复。控制器不能保证绕过平台限流，也不能把挑战页当作可自动突破的障碍。
 
-rate controller 是显式 caller scheduler，不是 `request()` 的透明拦截器。因为低层请求没有可
-信任的 origin/Profile/account scope，专项 Skill 必须在每个受控批次前消费 decision、按其调度，
-并在批次后回传观察；机器能力以 `implicitRequestGate:false` 明确这一边界。
+正常 task wrapper 在导航确定 HTTP(S) origin 后，自动 gate 高层 Task Space 导航、语义、滚动、
+截图和 `taskRequest`，并 observe 可识别的成功/限流异常。专项 Skill 继续显式补充 account、批次、
+`Retry-After`、latency 和 durable checkpoint。低层 `request()` 没有可信 scope，仍不透明拦截；
+机器能力同时声明 `taskRuntimeImplicitGate:true` 与 `implicitRequestGate:false`。
+
+## 长任务、进度与完成
+
+`--task` 在提交时生成 `taskExecutionId`。resident controller 把每个 task 事件先写入用户私有、
+build-bound JSONL journal，再写客户端 socket；调用 Agent 消失不会取消任务。新 Agent 用
+`--task-status` / `--task-follow` 接回同一执行，controller 已终止且无 terminal 时只返回
+`interrupted`，不会重启动作。
+
+进度、monitor、recovery、effect、rate 和 terminal 都带 Agent/user `relay`；watchdog 仍保证
+10 秒 heartbeat 与 15 秒活动静默截图。任务声称 `complete` 时，controller 在 exact-window cleanup
+后构建私有 evidence bundle，并检查最新 effect receipt、rate circuit/checkpoint、instruction wait
+和声明的 requirements；任何未闭合项返回 `TASK_COMPLETION_GATE_FAILED`。
 
 ## 专项 Skill 组合
 
