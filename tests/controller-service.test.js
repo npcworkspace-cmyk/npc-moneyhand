@@ -89,11 +89,13 @@ async function unusedPort() {
 
 test("controller service is localhost-only and preserves active work past idle timeout", async (t) => {
   const port = await unusedPort();
-  const service = await startControllerService({
+  let service;
+  service = await startControllerService({
     port,
-    idleTimeoutMs: 40,
+    idleTimeoutMs: 5_000,
     async handle(request, context) {
       assert.equal(request.command, "work");
+      service.idleTimeoutMs = 40;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 90));
       await context.send({ type: "result", id: "work", ok: true, value: 42 });
     },
