@@ -33,6 +33,7 @@ import {
   readLatestTaskExecutionStatus,
   readTaskExecutionEntries,
   readTaskExecutionStatus,
+  taskSummaryState,
 } from "./lib/task-ledger.mjs";
 import { TaskEffectReceipts } from "./lib/task-effects.mjs";
 import {
@@ -2361,6 +2362,18 @@ export class MoneyHand extends EventEmitter {
           mutableControllerInternalsExposed: false,
           unresponsiveResourceCleanup: "terminate-task-worker-before-task-window-cleanup",
           resultId: "task",
+          returnedValuePreservedAt: "terminal-id-task.value",
+          authoring: {
+            template: "assets/disposable-task.mjs",
+            onlyEditableFunction: "executeTask",
+            fixedLifecycleMustBePreserved: true,
+            executeTaskReturn: "{outcome,output?}",
+            bulkOutput: "user-authorized-file-plus-small-manifest",
+            pageExpressionHelper: "pageExpression(pageFunction,input)",
+            recordGroupOrderHelper: "recordGroupOrderRequirement(records,expectedPageKeys,key)",
+            manualExpressionTemplatesAllowed: false,
+            completeExample: "references/bounded-file-task.example.mjs",
+          },
           submittedEvent: "moneyhand.task_submitted",
           taskExecutionIdSchema: "task-uuid-v4",
           statusFlags: ["--task-last", "--task-status", "--task-follow"],
@@ -2684,6 +2697,20 @@ export class MoneyHand extends EventEmitter {
         },
       },
       taskRuntime: {
+        authoring: {
+          template: "assets/disposable-task.mjs",
+          onlyEditableFunction: "executeTask",
+          fixedLifecycleMustBePreserved: true,
+          executeTaskReturn: "{outcome,output?}",
+          terminalValueField: "value",
+          bulkOutput: "user-authorized-file-plus-small-manifest",
+          evidenceRole: "bounded-completion-proof-not-business-data",
+          effectIdHelper: "stableEffectId(prefix,key)",
+          pageExpressionHelper: "pageExpression(pageFunction,input)",
+          recordGroupOrderHelper: "recordGroupOrderRequirement(records,expectedPageKeys,key)",
+          manualExpressionTemplatesAllowed: false,
+          completeExample: "references/bounded-file-task.example.mjs",
+        },
         helpers: [...TASK_MODULE_HELPERS],
         targetSelection: "latest-focused-profile-once-then-dedicated-owned-window",
         taskWindow: {
@@ -2722,6 +2749,8 @@ export class MoneyHand extends EventEmitter {
         },
         idempotentEffects: {
           field: "effectId",
+          acceptedPattern: "^[A-Za-z0-9._:-]{1,128}$",
+          rawUrlAllowed: false,
           scope: "one-task-execution",
           concurrentDuplicates: "join-first-promise",
           laterDuplicates: "reuse-first-result",
@@ -2743,11 +2772,21 @@ export class MoneyHand extends EventEmitter {
           cachedContextIdentifiersAllowed: false,
           returnByValue: true,
           awaitPromiseDefault: true,
+          defaultRequestTimeoutMs: 30_000,
           maximumExpressionBytes: MAX_TASK_EVALUATION_EXPRESSION_BYTES,
           rawCdpEscapeHatch: "taskRequest-cdp.send",
         },
         statusSummary: {
           schema: "npc-moneyhand-task-summary/1",
+          states: [
+            "running",
+            "completed",
+            "incomplete",
+            "outcome_unknown",
+            "needs_instruction",
+            "failed",
+            "interrupted",
+          ],
           fields: [
             "state",
             "phase",
@@ -2851,6 +2890,7 @@ export class MoneyHand extends EventEmitter {
             "rate-circuit-closed",
             "instruction-blockers-resolved",
             "declared-requirements",
+            "bulk-output-evidence-consistent",
           ],
         },
         screenshotRetry: {
@@ -9817,6 +9857,10 @@ export async function runMoneyHandTask(options = {}) {
       );
     }
   }
+  const summaryTerminal = taskError
+    ? { ok: false, error: normalizedError(taskError) }
+    : { ok: true, value: taskValue };
+  const summaryState = taskSummaryState(summaryTerminal);
   const terminalProgress = taskError
     ? {
         state: "failed",
@@ -9828,7 +9872,9 @@ export async function runMoneyHandTask(options = {}) {
     : {
         state: "completed",
         phase: "complete",
-        message: "MoneyHand task completed and cleanup succeeded",
+        message: summaryState === "completed"
+          ? "MoneyHand task completed and cleanup succeeded"
+          : `MoneyHand task ended with ${summaryState} outcome after cleanup`,
       };
   await emitProgress(terminalProgress).catch(() => {});
   const taskEvidence = evidenceCollector.build({
@@ -9838,11 +9884,9 @@ export async function runMoneyHandTask(options = {}) {
   });
   const summaryAtMs = Date.now();
   const taskSummary = buildTaskSummary({
-    state: taskError ? "failed" : "completed",
+    state: summaryState,
     evidence: taskEvidence,
-    terminal: taskError
-      ? { ok: false, error: normalizedError(taskError) }
-      : { ok: true, value: taskValue },
+    terminal: summaryTerminal,
     updatedAt: new Date(summaryAtMs).toISOString(),
     now: () => summaryAtMs,
   });

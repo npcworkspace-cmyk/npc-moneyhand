@@ -1,7 +1,7 @@
 {
   "schema": "npc-moneyhand-extension-integrity/1",
   "product": "npc-moneyhand",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "algorithm": "sha256",
   "coverage": {
     "mode": "complete-extension-tree",
@@ -108,7 +108,7 @@
     {
       "path": "manifest.json",
       "bytes": 849,
-      "sha256": "ca44f0b2ad13202f4350c31bec92b692ab3f17cf1492662bdfba2c7f28d2c491"
+      "sha256": "c4819f85b92e035dd3c36dab35ca6d1085103c91ab466874aa48b224536043e4"
     },
     {
       "path": "popup.css",

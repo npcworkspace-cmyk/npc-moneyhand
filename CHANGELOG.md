@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.0] - 2026-08-22
+
+- Make `executeTask()` the only editable function in disposable and specialized task templates while preserving the fixed lifecycle and cleanup wrapper.
+- Add deterministic URL-safe effect IDs, an explicit terminal/output contract, bounded wait/evaluation rules, and a `pageExpression()` helper that makes literal `${...}` page text safe by construction.
+- Add a complete platform-neutral multi-page JSONL/checkpoint/manifest task example with overwrite protection and automated regression coverage.
+- Make the complete example genuinely one-page-to-many-records and add a grouped-order helper that prohibits invented per-page cardinalities.
+- Require one machine-checkable completion requirement for every explicit user acceptance condition instead of allowing a generic count to hide missing page, order, identifier, or field checks.
+- Reject complete claims when a bulk output manifest and its `output-file` evidence disagree on path, format, or count.
+- Keep execution-terminal state separate from business outcome so `taskSummary` never labels an incomplete result as successful and points the Agent to its captured visual evidence.
+
 ## [1.1.1] - 2026-08-22
 
 - Deduplicate watchdog screenshots by task-activity epoch so one continuous silence cannot trigger an immediate second capture on a busy event loop.

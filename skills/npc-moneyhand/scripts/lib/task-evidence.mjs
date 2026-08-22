@@ -41,6 +41,37 @@ function declaredRequirements(value) {
   return { valid: true, entries };
 }
 
+function bulkOutputEvidence(value, evidence) {
+  const output = value?.output;
+  if (!output || typeof output !== "object" || Array.isArray(output)
+    || !Object.hasOwn(output, "path") || !Object.hasOwn(output, "count")) {
+    return {
+      passed: true,
+      detail: "not applicable because no path-and-count bulk output was declared",
+    };
+  }
+  if (typeof output.path !== "string" || output.path.length < 1
+    || !Number.isSafeInteger(output.count) || output.count < 0) {
+    return { passed: false, detail: "bulk output path/count contract is invalid" };
+  }
+  const matches = (evidence?.taskProvidedEvidence ?? []).filter((entry) => (
+    entry && typeof entry === "object" && !Array.isArray(entry)
+    && entry.type === "output-file" && entry.path === output.path
+  ));
+  const exact = matches.some((entry) => (
+    entry.count === output.count
+    && (output.format === undefined || entry.format === output.format)
+  ));
+  return {
+    passed: exact,
+    detail: exact
+      ? "bulk output path, format, and count match task evidence"
+      : matches.length > 0
+        ? "bulk output evidence count or format does not match the output manifest"
+        : "bulk output has no matching output-file evidence",
+  };
+}
+
 export class TaskEvidenceCollector {
   constructor(options = {}) {
     this.taskExecutionId = options.taskExecutionId ?? null;
@@ -136,6 +167,7 @@ export function evaluateTaskCompletion({ value, cleanup, evidence } = {}) {
   const status = taskStatus(value);
   const claimedComplete = COMPLETE_STATES.has(status);
   const requirements = declaredRequirements(value);
+  const outputEvidence = bulkOutputEvidence(value, evidence);
   const latestRateByScope = new Map();
   const latestEffectById = new Map();
   for (const entry of evidence?.effects ?? []) {
@@ -178,6 +210,13 @@ export function evaluateTaskCompletion({ value, cleanup, evidence } = {}) {
         : requirements.valid
         ? `${requirements.entries.filter((entry) => entry.satisfied).length}/${requirements.entries.length} satisfied`
         : "requirements contract is invalid",
+    },
+    {
+      id: "bulk-output-evidence-consistent",
+      passed: !claimedComplete || outputEvidence.passed,
+      detail: !claimedComplete
+        ? "not applicable because the task did not claim complete"
+        : outputEvidence.detail,
     },
   ];
   return {

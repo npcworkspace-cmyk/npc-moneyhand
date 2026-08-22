@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "npc-moneyhand",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "controlProtocol": "npc-moneyhand-control/1",
   "wireProtocol": "npc-moneyhand/2",
   "runtime": {
@@ -560,6 +560,20 @@
     "timeoutAfterNavigation": "action-dispatched-inspect-before-retry"
   },
   "taskRuntime": {
+    "authoring": {
+      "template": "assets/disposable-task.mjs",
+      "onlyEditableFunction": "executeTask",
+      "fixedLifecycleMustBePreserved": true,
+      "executeTaskReturn": "{outcome,output?}",
+      "terminalValueField": "value",
+      "bulkOutput": "user-authorized-file-plus-small-manifest",
+      "evidenceRole": "bounded-completion-proof-not-business-data",
+      "effectIdHelper": "stableEffectId(prefix,key)",
+      "pageExpressionHelper": "pageExpression(pageFunction,input)",
+      "recordGroupOrderHelper": "recordGroupOrderRequirement(records,expectedPageKeys,key)",
+      "manualExpressionTemplatesAllowed": false,
+      "completeExample": "references/bounded-file-task.example.mjs"
+    },
     "helpers": [
       "beginTaskContext",
       "probeTaskContext",
@@ -616,6 +630,8 @@
     },
     "idempotentEffects": {
       "field": "effectId",
+      "acceptedPattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "rawUrlAllowed": false,
       "scope": "one-task-execution",
       "concurrentDuplicates": "join-first-promise",
       "laterDuplicates": "reuse-first-result",
@@ -637,11 +653,21 @@
       "cachedContextIdentifiersAllowed": false,
       "returnByValue": true,
       "awaitPromiseDefault": true,
+      "defaultRequestTimeoutMs": 30000,
       "maximumExpressionBytes": 1048576,
       "rawCdpEscapeHatch": "taskRequest-cdp.send"
     },
     "statusSummary": {
       "schema": "npc-moneyhand-task-summary/1",
+      "states": [
+        "running",
+        "completed",
+        "incomplete",
+        "outcome_unknown",
+        "needs_instruction",
+        "failed",
+        "interrupted"
+      ],
       "fields": [
         "state",
         "phase",
@@ -751,7 +777,8 @@
         "effect-outcomes-resolved",
         "rate-circuit-closed",
         "instruction-blockers-resolved",
-        "declared-requirements"
+        "declared-requirements",
+        "bulk-output-evidence-consistent"
       ]
     },
     "screenshotRetry": {
@@ -831,6 +858,18 @@
       "mutableControllerInternalsExposed": false,
       "unresponsiveResourceCleanup": "terminate-task-worker-before-task-window-cleanup",
       "resultId": "task",
+      "returnedValuePreservedAt": "terminal-id-task.value",
+      "authoring": {
+        "template": "assets/disposable-task.mjs",
+        "onlyEditableFunction": "executeTask",
+        "fixedLifecycleMustBePreserved": true,
+        "executeTaskReturn": "{outcome,output?}",
+        "bulkOutput": "user-authorized-file-plus-small-manifest",
+        "pageExpressionHelper": "pageExpression(pageFunction,input)",
+        "recordGroupOrderHelper": "recordGroupOrderRequirement(records,expectedPageKeys,key)",
+        "manualExpressionTemplatesAllowed": false,
+        "completeExample": "references/bounded-file-task.example.mjs"
+      },
       "submittedEvent": "moneyhand.task_submitted",
       "taskExecutionIdSchema": "task-uuid-v4",
       "statusFlags": [
@@ -871,7 +910,7 @@
     "builtInController": {
       "protocol": "npc-moneyhand-controller/2",
       "product": "npc-moneyhand",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "endpoint": "127.0.0.1:19845",
       "startup": "implicit-on-connect-call-or-task",
       "installation": "bundled-in-the-skill-no-separate-software",

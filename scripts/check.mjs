@@ -18,8 +18,8 @@ const packageJson = readJson("package.json");
 const manifest = readJson("extension/manifest.json");
 
 if (packageJson.name !== "npc-moneyhand") fail("package name must be npc-moneyhand");
-if (packageJson.version !== "1.1.1") {
-  fail("package version must be 1.1.1");
+if (packageJson.version !== "1.2.0") {
+  fail("package version must be 1.2.0");
 }
 if (packageJson.dependencies || packageJson.devDependencies || packageJson.optionalDependencies) {
   fail("npc-moneyhand must not declare external dependencies");
@@ -29,7 +29,7 @@ if (existsSync(join(root, "package-lock.json"))) {
 }
 
 if (manifest.name !== "npc-moneyhand") fail("extension name must be npc-moneyhand");
-if (manifest.version !== "1.1.1") fail("extension version must be 1.1.1");
+if (manifest.version !== "1.2.0") fail("extension version must be 1.2.0");
 if (manifest.version_name !== packageJson.version) {
   fail("manifest version_name must match package version");
 }
@@ -71,6 +71,7 @@ const requiredFiles = [
   "skills/npc-moneyhand/assets/connect-acceptance.mjs",
   "skills/npc-moneyhand/assets/specialized-task.mjs",
   "skills/npc-moneyhand/references/task-runtime.md",
+  "skills/npc-moneyhand/references/bounded-file-task.example.mjs",
   "skills/npc-moneyhand/references/task-recovery.md",
   "skills/npc-moneyhand/references/behavior-modes.md",
   "skills/npc-moneyhand/references/moneyhand-contract.json",
@@ -184,6 +185,22 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.automaticConnection?.extensionDistribution?.assetName
     !== "npc-moneyhand-extension.zip"
   || contract.automaticConnection?.extensionDistribution?.manualInstallRequired !== true
+  || contract.taskRuntime?.authoring?.onlyEditableFunction !== "executeTask"
+  || contract.taskRuntime?.authoring?.fixedLifecycleMustBePreserved !== true
+  || contract.taskRuntime?.authoring?.executeTaskReturn !== "{outcome,output?}"
+  || contract.taskRuntime?.authoring?.terminalValueField !== "value"
+  || contract.taskRuntime?.authoring?.bulkOutput
+    !== "user-authorized-file-plus-small-manifest"
+  || contract.taskRuntime?.authoring?.evidenceRole
+    !== "bounded-completion-proof-not-business-data"
+  || contract.taskRuntime?.authoring?.effectIdHelper !== "stableEffectId(prefix,key)"
+  || contract.taskRuntime?.authoring?.pageExpressionHelper
+    !== "pageExpression(pageFunction,input)"
+  || contract.taskRuntime?.authoring?.recordGroupOrderHelper
+    !== "recordGroupOrderRequirement(records,expectedPageKeys,key)"
+  || contract.taskRuntime?.authoring?.manualExpressionTemplatesAllowed !== false
+  || contract.taskRuntime?.authoring?.completeExample
+    !== "references/bounded-file-task.example.mjs"
   || contract.ownership?.taskSpaces?.maximumParallelRequests !== 64
   || contract.ownership?.taskSpaces?.maximumConcurrency !== 16
   || contract.ownership?.taskSpaces?.highImpactApproval?.enforcement !== "optional-caller-policy"
@@ -218,14 +235,29 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.progress?.watchdogPollMaximumMs !== 250
   || contract.taskRuntime?.progress?.streamsBeforeTaskCompletion !== true
   || contract.taskRuntime?.progress?.screenshotOnSilence !== true
+  || contract.taskRuntime?.idempotentEffects?.acceptedPattern
+    !== "^[A-Za-z0-9._:-]{1,128}$"
+  || contract.taskRuntime?.idempotentEffects?.rawUrlAllowed !== false
   || contract.taskRuntime?.currentDocumentEvaluation?.operation !== "evaluateTaskTab"
   || contract.taskRuntime?.currentDocumentEvaluation?.cachedContextIdentifiersAllowed !== false
+  || contract.taskRuntime?.currentDocumentEvaluation?.defaultRequestTimeoutMs !== 30000
   || contract.taskRuntime?.statusSummary?.schema !== "npc-moneyhand-task-summary/1"
+  || !contract.taskRuntime?.statusSummary?.states?.includes("incomplete")
+  || !contract.taskRuntime?.statusSummary?.states?.includes("outcome_unknown")
   || contract.taskRuntime?.recoveryEnvelope?.schema !== "npc-moneyhand-task-recovery/1"
   || !contract.transports?.taskModule?.terminalEvidenceFields?.includes("taskSummary")
   || contract.transports?.taskModule?.flag !== "--task"
   || contract.transports?.taskModule?.signature
     !== "run({ moneyhand, signal, args, progress, taskExecutionId })"
+  || contract.transports?.taskModule?.returnedValuePreservedAt
+    !== "terminal-id-task.value"
+  || contract.transports?.taskModule?.authoring?.onlyEditableFunction !== "executeTask"
+  || contract.transports?.taskModule?.authoring?.fixedLifecycleMustBePreserved !== true
+  || contract.transports?.taskModule?.authoring?.pageExpressionHelper
+    !== "pageExpression(pageFunction,input)"
+  || contract.transports?.taskModule?.authoring?.recordGroupOrderHelper
+    !== "recordGroupOrderRequirement(records,expectedPageKeys,key)"
+  || contract.transports?.taskModule?.authoring?.manualExpressionTemplatesAllowed !== false
   || contract.transports?.taskModule?.timeoutFlag !== "--task-timeout-ms"
   || contract.transports?.taskModule?.defaultTimeoutMs !== 1800000
   || contract.transports?.taskModule?.maximumTimeoutMs !== 86400000

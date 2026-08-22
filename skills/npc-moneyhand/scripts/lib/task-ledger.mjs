@@ -224,6 +224,11 @@ function summaryNextAction(state, rate, visual, recovery, terminal) {
   if (visual?.waitingForInstruction === true || recovery?.waitingForInstruction === true) {
     return "resolve-task-blocker";
   }
+  if (state === "needs_instruction") return "report-needs-instruction";
+  if (state === "outcome_unknown") return "inspect-outcome-before-retry";
+  if (state === "incomplete") {
+    return visual?.captured === true ? "inspect-visual-fallback" : "inspect-terminal-outcome";
+  }
   if (state === "failed") {
     return terminal?.error?.details?.recovery?.nextAction
       ?? recovery?.nextAction
@@ -233,6 +238,17 @@ function summaryNextAction(state, rate, visual, recovery, terminal) {
   if (rate?.waitMs > 0) return "wait-for-rate-window";
   if (typeof recovery?.nextAction === "string") return recovery.nextAction;
   return "continue-task-follow";
+}
+
+export function taskSummaryState(terminal, fallback = "interrupted") {
+  if (!terminal || typeof terminal !== "object" || Array.isArray(terminal)) return fallback;
+  if (terminal.ok !== true) return "failed";
+  const status = terminal.value?.outcome?.status ?? terminal.value?.status;
+  if (status === "complete") return "completed";
+  if (["incomplete", "outcome_unknown", "needs_instruction", "failed"].includes(status)) {
+    return status;
+  }
+  return "completed";
 }
 
 export function buildTaskSummary(options = {}) {
@@ -252,6 +268,9 @@ export function buildTaskSummary(options = {}) {
   const checkpoint = latest(checkpoints, (entry) => typeof entry?.checkpoint === "string");
   const latestRate = latest(rateControl);
   const latestVisual = latest(visuals);
+  const terminalVisual = options.terminal?.value?.outcome?.visualFallback
+    ?? options.terminal?.value?.visualFallback
+    ?? options.terminal?.error?.details?.visualFallback;
   const latestRecovery = options.terminal?.error?.details?.recovery ?? latest(recoveries);
   const rate = latestRate ? {
     state: typeof latestRate.state === "string" ? latestRate.state : null,
@@ -260,14 +279,23 @@ export function buildTaskSummary(options = {}) {
     stop: latestRate.stop === true,
     checkpointRequired: latestRate.checkpointRequired === true,
   } : null;
-  const visual = latestVisual ? {
-    captured: latestVisual.captured === true,
-    path: typeof latestVisual.path === "string" ? latestVisual.path : null,
-    waitingForInstruction: latestVisual.waitingForInstruction === true,
+  const visualSource = terminalVisual ?? latestVisual;
+  const visual = visualSource ? {
+    captured: visualSource.captured === true,
+    path: typeof visualSource.path === "string"
+      ? visualSource.path
+      : typeof visualSource.screenshot?.path === "string" ? visualSource.screenshot.path : null,
+    waitingForInstruction: visualSource.waitingForInstruction === true,
   } : null;
   const updatedAtMs = Date.parse(options.updatedAt ?? "");
   const now = typeof options.now === "function" ? options.now() : Date.now();
-  const phase = state === "completed" || state === "failed"
+  const phase = [
+    "completed",
+    "incomplete",
+    "outcome_unknown",
+    "needs_instruction",
+    "failed",
+  ].includes(state)
     ? "complete"
     : state === "interrupted"
       ? "interrupted"
@@ -317,7 +345,7 @@ function publicStatus(meta, entries, currentController, now) {
     terminal: terminalEntry?.message ?? null,
     reattachable: state === "running",
     taskSummary: buildTaskSummary({
-      state,
+      state: terminalEntry ? taskSummaryState(terminalEntry.message, state) : state,
       evidence,
       terminal: terminalEntry?.message,
       updatedAt,

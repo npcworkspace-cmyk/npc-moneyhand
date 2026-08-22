@@ -277,7 +277,7 @@ test("portable Skill ZIP is deterministic, complete and runnable from special pa
   assert.equal(built.schema, "npc-moneyhand-portable-skill-build/2");
   assert.equal(built.manifest.schema, "npc-moneyhand-portable-skill-manifest/2");
   assert.equal(built.manifest.name, "npc-moneyhand");
-  assert.equal(built.manifest.version, "1.1.1");
+  assert.equal(built.manifest.version, "1.2.0");
   assert.equal(built.manifest.runtime.externalPackages, 0);
   assert.equal(built.manifest.reproducible, true);
   assert.equal(built.manifest.extension.bundled, false);
@@ -293,8 +293,8 @@ test("portable Skill ZIP is deterministic, complete and runnable from special pa
   );
   assert.equal(built.manifest.extension.assetName, "npc-moneyhand-extension.zip");
   assert.equal(built.manifest.extension.manualInstallRequired, true);
-  assert.equal(built.manifest.extension.version, "1.1.1");
-  assert.equal(built.manifest.extension.versionName, "1.1.1");
+  assert.equal(built.manifest.extension.version, "1.2.0");
+  assert.equal(built.manifest.extension.versionName, "1.2.0");
   assert.equal(built.manifest.extension.manifestVersion, 3);
   assert.equal(
     built.manifest.extension.integrity.schema,
@@ -366,7 +366,7 @@ test("portable Skill ZIP is deterministic, complete and runnable from special pa
   const unpacked = join(extraction, "npc-moneyhand");
   const packageJson = JSON.parse(await readFile(join(unpacked, "package.json"), "utf8"));
   assert.equal(packageJson.name, "npc-moneyhand");
-  assert.equal(packageJson.version, "1.1.1");
+  assert.equal(packageJson.version, "1.2.0");
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "devDependencies"]) {
     assert.deepEqual(packageJson[field] ?? {}, {}, `${field} must stay empty`);
   }

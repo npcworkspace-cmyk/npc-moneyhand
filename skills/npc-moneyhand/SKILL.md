@@ -115,9 +115,14 @@ stop instead of inventing an alternative installation.
 Read `references/task-runtime.md` before writing or running task logic. It is the short, single normal
 task path and contains copyable argument shapes. Do not preload recovery or full API references.
 Never run `assets/disposable-task.mjs`, `assets/specialized-task.mjs`, or an unchanged copy. Copy the
-appropriate template to a task-owned temporary path, replace its placeholder with the concrete task,
-and remove the `MONEYHAND_TASK_TEMPLATE` sentinel before `--task`. The controller rejects an unchanged
-template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch; implement it instead of retrying.
+appropriate template to a task-owned temporary path, remove the `MONEYHAND_TASK_TEMPLATE` sentinel,
+and replace only its `executeTask()` function; preserve the fixed `run()` lifecycle. The controller
+rejects an unchanged template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch; implement it
+instead of retrying. For a first multi-page or file-producing task, follow the complete platform-neutral
+`references/bounded-file-task.example.mjs` pattern instead of inventing an output loop. For every
+page-side DOM read, use the template's `pageExpression(pageFunction,input)` helper; never hand-build an
+`expression` template string. When output records must preserve page order, copy
+`recordGroupOrderRequirement(records,expectedPageKeys)` instead of expanding page IDs from a guessed per-page count.
 MoneyHand selects the latest focused connected Profile once, opens one dedicated task window in
 that Profile, pins it under a generated `taskId`, and closes that exact window in cleanup. The Agent
 must never enumerate or guess tab/window IDs. A later focus change is not permission to retarget. If
@@ -178,6 +183,17 @@ local image viewer. Do not take a second screenshot or replay the original actio
 `waitingForInstruction:true`, use only `resolveTaskBlocker({taskSpaceId,action:"resume"|"cancel"})`;
 never search for `tabId` or `waitId`. Automatic images are local-sensitive temporary PNG files and
 must not be pasted into remote/shared logs without user authorization.
+
+`progress()` is the streaming channel. `executeTask()` returns `{outcome,output?}` once, and the fixed
+wrapper preserves it at terminal `id:"task".value`; `taskSummary` and `taskEvidence` are additive.
+Write every bulk list or downloaded dataset to a user-authorized task file and return a small output
+manifest. Evidence proves the result with bounded paths, counts, IDs, hashes, or screenshots; it is
+never the bulk-data payload. Use the template's `stableEffectId(prefix,key)` for raw URLs or other
+canonical keys instead of hand-building effect IDs.
+Before claiming `complete`, map every explicit user acceptance condition to a separate requirement;
+record count, page count, order, required IDs, and required field values must never share one generic check.
+Collect every bounded matching row; never invent an exact per-page count or field assertion the user omitted.
+For file output, `output.path/count` and `output-file` evidence must describe the same file and count.
 
 Run every `--task` as one foreground-attached command and keep consuming its stdout until the terminal
 `id:"task"` result. Record the `taskExecutionId` from `moneyhand.task_submitted`. Never detach, background, fire-and-forget,

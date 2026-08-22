@@ -91,7 +91,7 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
     readFile("skills/npc-moneyhand/references/task-recovery.md", "utf8"),
     readFile("skills/npc-moneyhand/references/browser-workflows.md", "utf8"),
   ]);
-  assert.ok(runtime.trimEnd().split(/\r?\n/u).length <= 190, "normal task path is too dense");
+  assert.ok(runtime.trimEnd().split(/\r?\n/u).length <= 210, "normal task path is too dense");
   assert.match(runtime, /assets\/disposable-task\.mjs/u);
   assert.match(runtime, /Read another reference only when/u);
   assert.match(runtime, /task-recovery\.md/u);
@@ -101,7 +101,7 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(recovery, /TASK_WINDOW_OWNERSHIP_CHANGED/u);
   assert.match(recovery, /unknown creation outcome without an acknowledged[\s\S]*ID is never removed/u);
   assert.match(runtime, /evaluateTaskTab/u);
-  assert.match(runtime, /cached `contextId`, `executionContextId`, or `objectId`/u);
+  assert.match(runtime, /cached `contextId`,\s*`executionContextId`, or `objectId`/u);
   assert.match(runtime, /`isUndefined:true`/u);
   assert.match(workflows, /method: "cdp\.send",[\s\S]*method: "Runtime\.evaluate"/u);
   assert.match(workflows, /Raw CDP keeps its native nested result/u);
@@ -109,10 +109,24 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(runtime, /Deduplicate by canonical identifier/u);
   for (const text of [runtime, await readFile(SKILL_PATH, "utf8")]) {
     assert.match(text, /path\/byte count proves transport only/u);
-    assert.match(text, /task-specific visible sentinel/u);
+    assert.match(text, /task-specific\s+visible sentinel/u);
   }
   assert.match(recovery, /supplies its `AbortSignal` automatically/u);
   assert.match(runtime, /timeoutMs: 30_000,[\s\S]*signal,/u);
+  assert.match(runtime, /replace only `executeTask\(\)`/u);
+  assert.match(runtime, /terminal[\s\S]*`id:"task"\.value`/u);
+  assert.match(runtime, /must not be used as the bulk-data payload/u);
+  assert.match(runtime, /\[A-Za-z0-9\._:-\]/u);
+  assert.match(runtime, /ceil\(timeoutMs \/ pollIntervalMs\) \+ 1 <= 512/u);
+  assert.match(runtime, /bounded-file-task\.example\.mjs/u);
+  assert.match(runtime, /pageExpression\(pageFunction,input\)/u);
+  assert.match(runtime, /recordGroupOrderRequirement\(records, expectedPageKeys\)/u);
+  assert.match(runtime, /never expand IDs using assumed per-page counts/u);
+  assert.match(runtime, /Do not hand-build an `expression` template string/u);
+  assert.match(runtime, /literalExample: "literal-\$\{POST_ID\}"/u);
+  assert.match(runtime, /Map every explicit user acceptance[\s\S]*its own machine-checkable requirement/u);
+  assert.match(runtime, /never merge record count, page count, order,[\s\S]*required field values/u);
+  assert.match(runtime, /one-page-to-many-records[\s\S]*never\s+invent a per-page cardinality/u);
 });
 
 test("normal task docs expose timeout cleanup and non-ambiguous screenshot terminals", async () => {

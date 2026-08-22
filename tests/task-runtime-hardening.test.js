@@ -194,6 +194,40 @@ test("task ledger derives one compact status summary from progress, rate, visual
   assert.equal(completed.taskSummary.lastActivityAgoMs, 0);
 });
 
+test("task summary never labels an incomplete business outcome as completed", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "npc-moneyhand-ledger-incomplete-summary-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const ledger = await TaskExecutionLedger.create({
+    root,
+    controller,
+    taskPath: join(root, "task.mjs"),
+  });
+  await ledger.finish({
+    ok: true,
+    value: {
+      outcome: {
+        status: "incomplete",
+        reason: "PAGE_RECORD_INVALID",
+        visualFallback: {
+          captured: true,
+          screenshot: { path: "C:\\evidence\\incomplete.png" },
+        },
+      },
+    },
+  });
+  const status = await readTaskExecutionStatus({
+    root,
+    build,
+    controller,
+    taskExecutionId: ledger.taskExecutionId,
+  });
+  assert.equal(status.state, "completed", "execution lifecycle still reached a terminal record");
+  assert.equal(status.taskSummary.state, "incomplete");
+  assert.equal(status.taskSummary.visual.captured, true);
+  assert.equal(status.taskSummary.visual.path, "C:\\evidence\\incomplete.png");
+  assert.equal(status.taskSummary.nextAction, "inspect-visual-fallback");
+});
+
 test("effect receipts collapse concurrent and later duplicates without hiding unknown outcomes", async () => {
   const events = [];
   const receipts = new TaskEffectReceipts({
@@ -360,6 +394,54 @@ test("completion gate uses latest receipts, rate circuits, cleanup, and declared
       passed: true,
       detail: "not applicable because the task did not claim complete",
     },
+  );
+});
+
+test("completion gate rejects a bulk output whose file evidence disagrees with its manifest", () => {
+  const collector = new TaskEvidenceCollector({ taskExecutionId: "task-output-proof", startedAtMs: 0 });
+  const makeValue = (evidenceCount) => ({
+    outcome: {
+      status: "complete",
+      requirements: [{ id: "six-records", satisfied: true, expected: 6, actual: 6 }],
+      evidence: [{
+        type: "output-file",
+        path: "C:\\task\\records.jsonl",
+        format: "jsonl",
+        count: evidenceCount,
+      }],
+    },
+    output: {
+      path: "C:\\task\\records.jsonl",
+      format: "jsonl",
+      count: 6,
+    },
+  });
+  const matchingValue = makeValue(6);
+  const matching = evaluateTaskCompletion({
+    value: matchingValue,
+    cleanup: { ok: true },
+    evidence: collector.build({ value: matchingValue, cleanup: { ok: true } }),
+  });
+  assert.equal(matching.passed, true);
+  assert.deepEqual(
+    matching.checks.find((entry) => entry.id === "bulk-output-evidence-consistent"),
+    {
+      id: "bulk-output-evidence-consistent",
+      passed: true,
+      detail: "bulk output path, format, and count match task evidence",
+    },
+  );
+
+  const mismatchedValue = makeValue(3);
+  const mismatched = evaluateTaskCompletion({
+    value: mismatchedValue,
+    cleanup: { ok: true },
+    evidence: collector.build({ value: mismatchedValue, cleanup: { ok: true } }),
+  });
+  assert.equal(mismatched.passed, false);
+  assert.equal(
+    mismatched.checks.find((entry) => entry.id === "bulk-output-evidence-consistent").passed,
+    false,
   );
 });
 

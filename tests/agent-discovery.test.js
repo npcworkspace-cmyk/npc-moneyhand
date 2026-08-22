@@ -16,7 +16,7 @@ const CONTRACT = "skills/npc-moneyhand/references/moneyhand-contract.json";
 const CATALOG = "skills/npc-moneyhand/references/agent-operations.json";
 const PRODUCT = {
   package: "npc-moneyhand",
-  version: "1.1.1",
+  version: "1.2.0",
   executable: "moneyhand",
   productProtocol: "npc-moneyhand-control/1",
 };

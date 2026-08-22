@@ -1,6 +1,69 @@
-// Copy this file to a task-owned temporary path and replace the bounded placeholder below.
+import { createHash } from "node:crypto";
+
+// Copy this file to a task-owned temporary path. Remove the sentinel and replace only
+// executeTask(); keep run() and its lifecycle unchanged.
 // MoneyHand rejects this sentinel at runtime, including in an unchanged copy.
 export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";
+
+export function stableEffectId(prefix, key) {
+  const safePrefix = String(prefix ?? "effect")
+    .replace(/[^A-Za-z0-9._:-]/gu, "_")
+    .slice(0, 32) || "effect";
+  const stableKey = String(key ?? "");
+  if (!stableKey) {
+    const error = new Error("stableEffectId() requires a non-empty canonical key");
+    error.code = "INVALID_EFFECT_KEY";
+    throw error;
+  }
+  const digest = createHash("sha256").update(stableKey).digest("hex").slice(0, 24);
+  return `${safePrefix}:${digest}`;
+}
+
+export function pageExpression(pageFunction, input) {
+  if (typeof pageFunction !== "function") {
+    const error = new Error("pageExpression() requires an arrow or function expression");
+    error.code = "INVALID_PAGE_EXPRESSION";
+    throw error;
+  }
+  let encodedInput;
+  try {
+    encodedInput = JSON.stringify(input);
+  } catch (cause) {
+    const error = new Error("pageExpression() input must be JSON-serializable", { cause });
+    error.code = "INVALID_PAGE_EXPRESSION_INPUT";
+    throw error;
+  }
+  if (encodedInput === undefined) encodedInput = "null";
+  return `(${Function.prototype.toString.call(pageFunction)})(${encodedInput})`;
+}
+
+export function recordGroupOrderRequirement(records, expectedPageKeys, key = "pageKey") {
+  if (!Array.isArray(records) || !Array.isArray(expectedPageKeys) || expectedPageKeys.length < 1) {
+    const error = new Error("recordGroupOrderRequirement() requires records and expected page keys");
+    error.code = "INVALID_RECORD_GROUP_ORDER_INPUT";
+    throw error;
+  }
+  const expected = expectedPageKeys.map((value) => String(value));
+  const actual = [];
+  for (const record of records) {
+    const value = record && typeof record === "object" && !Array.isArray(record)
+      ? String(record[key] ?? "")
+      : "";
+    if (!value) {
+      const error = new Error(`Every record needs a non-empty '${key}' value`);
+      error.code = "INVALID_RECORD_GROUP_ORDER_INPUT";
+      throw error;
+    }
+    if (actual.at(-1) !== value) actual.push(value);
+  }
+  return {
+    id: "record-page-order",
+    satisfied: actual.length === expected.length
+      && actual.every((value, index) => value === expected[index]),
+    expected: expected.join("\n"),
+    actual: actual.join("\n"),
+  };
+}
 
 function taskError(error) {
   return {
@@ -41,6 +104,48 @@ async function attachTerminalVisual(moneyhand, task, outcome) {
   }
 }
 
+async function executeTask({
+  moneyhand,
+  task,
+  signal,
+  args,
+  progress,
+  stableEffectId,
+  pageExpression,
+  recordGroupOrderRequirement,
+}) {
+  // Replace only this function body with the concrete bounded task. For every list or
+  // other bulk result, write a task-owned file and return a small output manifest;
+  // evidence proves completion and must not become the business-data payload.
+  void moneyhand;
+  void task;
+  void signal;
+  void args;
+  void progress;
+  void stableEffectId;
+  void pageExpression;
+  void recordGroupOrderRequirement;
+  return {
+    outcome: {
+      status: "incomplete",
+      reason: "TASK_LOGIC_NOT_IMPLEMENTED",
+      requirements: [{ id: "task-logic-implemented", satisfied: false }],
+      evidence: [],
+    },
+    output: null,
+  };
+}
+
+function taskResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || !value.outcome || typeof value.outcome !== "object" || Array.isArray(value.outcome)) {
+    const error = new Error("executeTask() must return { outcome, output? }");
+    error.code = "TASK_RESULT_CONTRACT_INVALID";
+    throw error;
+  }
+  return { outcome: value.outcome, output: value.output ?? null };
+}
+
 export async function run({ moneyhand, signal, args = {}, progress, taskExecutionId }) {
   const task = await moneyhand.beginTaskContext({
     ...(args.taskId ? { id: args.taskId } : {}),
@@ -51,25 +156,20 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
     signal,
   });
   let outcome;
+  let output = null;
   let lifecycle;
   try {
     await progress({ phase: "start", message: "Task context is ready" });
-    // Replace this bounded placeholder with task-specific logic. Prefer:
-    // navigateTaskTab, evaluateTaskTab, semantic actions, scrollTaskTab and captureStableViewport.
-    // In this task runner, captureSemanticSnapshot needs tabId but no selector;
-    // selector is a browser-session object, never CSS. Type uses text; select uses options.
-    // navigateTaskTab/navigateSemanticRef inject effect "navigation" and scrollTaskTab
-    // injects effect "input"; provide a stable effectId but do not guess those effects.
-    // evaluateTaskTab is read-only and selects the current default page context on every call;
-    // do not cache contextId/objectId across navigation.
-    // Give each replay-sensitive call a stable effectId such as
-    // `collect:${canonicalItemId}:open`; never derive it from a loop attempt number.
-    outcome = {
-      status: "incomplete",
-      reason: "TASK_LOGIC_NOT_IMPLEMENTED",
-      requirements: [{ id: "task-logic-implemented", satisfied: false }],
-      evidence: [],
-    };
+    ({ outcome, output } = taskResult(await executeTask({
+      moneyhand,
+      task,
+      signal,
+      args,
+      progress,
+      stableEffectId,
+      pageExpression,
+      recordGroupOrderRequirement,
+    })));
   } catch (error) {
     const normalized = taskError(error);
     const visualFallback = error?.details?.visualFallback;
@@ -101,6 +201,7 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
     args,
     task: { page: task.page, behavior: task.behavior },
     outcome,
+    output,
     lifecycle,
   };
 }

@@ -19,7 +19,7 @@ creates a GitHub Release.
 
 The `release` workflow has two explicit publishing paths:
 
-- pushing a version tag such as `v1.1.1` automatically verifies, builds and creates the
+- pushing a version tag such as `v1.2.0` automatically verifies, builds and creates the
   matching GitHub Release;
 - a manual run with `publish: false` only builds a downloadable workflow artifact; it does not
   create or modify a GitHub Release;

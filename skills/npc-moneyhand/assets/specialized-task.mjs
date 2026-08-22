@@ -1,6 +1,69 @@
-// Copy this file into the specialized Skill and replace its bounded workflow placeholder.
+import { createHash } from "node:crypto";
+
+// Copy this file into the specialized Skill. Remove the sentinel and replace only
+// executeTask(); keep run() and its lifecycle unchanged.
 // MoneyHand rejects this sentinel at runtime, including in an unchanged copy.
 export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";
+
+export function stableEffectId(prefix, key) {
+  const safePrefix = String(prefix ?? "effect")
+    .replace(/[^A-Za-z0-9._:-]/gu, "_")
+    .slice(0, 32) || "effect";
+  const stableKey = String(key ?? "");
+  if (!stableKey) {
+    const error = new Error("stableEffectId() requires a non-empty canonical key");
+    error.code = "INVALID_EFFECT_KEY";
+    throw error;
+  }
+  const digest = createHash("sha256").update(stableKey).digest("hex").slice(0, 24);
+  return `${safePrefix}:${digest}`;
+}
+
+export function pageExpression(pageFunction, input) {
+  if (typeof pageFunction !== "function") {
+    const error = new Error("pageExpression() requires an arrow or function expression");
+    error.code = "INVALID_PAGE_EXPRESSION";
+    throw error;
+  }
+  let encodedInput;
+  try {
+    encodedInput = JSON.stringify(input);
+  } catch (cause) {
+    const error = new Error("pageExpression() input must be JSON-serializable", { cause });
+    error.code = "INVALID_PAGE_EXPRESSION_INPUT";
+    throw error;
+  }
+  if (encodedInput === undefined) encodedInput = "null";
+  return `(${Function.prototype.toString.call(pageFunction)})(${encodedInput})`;
+}
+
+export function recordGroupOrderRequirement(records, expectedPageKeys, key = "pageKey") {
+  if (!Array.isArray(records) || !Array.isArray(expectedPageKeys) || expectedPageKeys.length < 1) {
+    const error = new Error("recordGroupOrderRequirement() requires records and expected page keys");
+    error.code = "INVALID_RECORD_GROUP_ORDER_INPUT";
+    throw error;
+  }
+  const expected = expectedPageKeys.map((value) => String(value));
+  const actual = [];
+  for (const record of records) {
+    const value = record && typeof record === "object" && !Array.isArray(record)
+      ? String(record[key] ?? "")
+      : "";
+    if (!value) {
+      const error = new Error(`Every record needs a non-empty '${key}' value`);
+      error.code = "INVALID_RECORD_GROUP_ORDER_INPUT";
+      throw error;
+    }
+    if (actual.at(-1) !== value) actual.push(value);
+  }
+  return {
+    id: "record-page-order",
+    satisfied: actual.length === expected.length
+      && actual.every((value, index) => value === expected[index]),
+    expected: expected.join("\n"),
+    actual: actual.join("\n"),
+  };
+}
 
 function taskError(error) {
   return {
@@ -41,6 +104,49 @@ async function attachTerminalVisual(moneyhand, task, outcome) {
   }
 }
 
+async function executeTask({
+  moneyhand,
+  task,
+  signal,
+  args,
+  progress,
+  stableEffectId,
+  pageExpression,
+  recordGroupOrderRequirement,
+}) {
+  // Replace only this function body with the specialized Skill's bounded domain workflow.
+  // Persist bulk domain data in the specialized Skill and return a small output manifest.
+  void moneyhand;
+  void task;
+  void signal;
+  void args;
+  void progress;
+  void stableEffectId;
+  void pageExpression;
+  void recordGroupOrderRequirement;
+  return {
+    outcome: {
+      status: "incomplete",
+      reason: "SPECIALIZED_WORKFLOW_NOT_IMPLEMENTED",
+      counts: {},
+      requirements: [{ id: "specialized-workflow-implemented", satisfied: false }],
+      evidence: [],
+      checkpoint: null,
+    },
+    output: null,
+  };
+}
+
+function taskResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || !value.outcome || typeof value.outcome !== "object" || Array.isArray(value.outcome)) {
+    const error = new Error("executeTask() must return { outcome, output? }");
+    error.code = "TASK_RESULT_CONTRACT_INVALID";
+    throw error;
+  }
+  return { outcome: value.outcome, output: value.output ?? null };
+}
+
 export async function run({ moneyhand, signal, args = {}, progress, taskExecutionId }) {
   const task = await moneyhand.beginTaskContext({
     ...(args.taskId ? { id: args.taskId } : {}),
@@ -51,28 +157,20 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
     signal,
   });
   let outcome;
+  let output = null;
   let lifecycle;
   try {
     await progress({ phase: "start", message: "Specialized task context is ready" });
-    // Replace only this outcome with the specialized Skill's bounded domain workflow.
-    // Reuse moneyhand and task; never start or stop another controller here. Call
-    // progress({phase,message,current,total,checkpoint}) after every bounded batch.
-    // captureSemanticSnapshot needs tabId but no selector in this task runner;
-    // selector is a browser-session object, never CSS. Type uses text; select uses options.
-    // Navigation helpers inject effect "navigation" and scrollTaskTab injects "input";
-    // provide stable effectId values but do not override those fixed effects.
-    // Use evaluateTaskTab for bounded read-only current-document extraction after any navigation;
-    // never carry contextId/objectId between documents.
-    // Use stable effectId values for replay-sensitive calls and return explicit
-    // {id,satisfied,expected,actual} requirements before claiming complete.
-    outcome = {
-      status: "incomplete",
-      reason: "SPECIALIZED_WORKFLOW_NOT_IMPLEMENTED",
-      counts: {},
-      requirements: [{ id: "specialized-workflow-implemented", satisfied: false }],
-      evidence: [],
-      checkpoint: null,
-    };
+    ({ outcome, output } = taskResult(await executeTask({
+      moneyhand,
+      task,
+      signal,
+      args,
+      progress,
+      stableEffectId,
+      pageExpression,
+      recordGroupOrderRequirement,
+    })));
   } catch (error) {
     const normalized = taskError(error);
     const visualFallback = error?.details?.visualFallback;
@@ -105,6 +203,7 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
     taskExecutionId,
     task: { page: task.page, behavior: task.behavior },
     outcome,
+    output,
     lifecycle,
   };
 }

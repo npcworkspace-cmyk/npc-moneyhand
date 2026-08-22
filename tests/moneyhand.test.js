@@ -76,18 +76,9 @@ test("MoneyHand task modules compose multiple steps in one trusted local code pa
   assert.deepEqual(calls, ["target.list", "behavior.get"]);
 });
 
-test("runMoneyHandTask rejects an unchanged packaged template before browser dispatch", async (t) => {
+test("runMoneyHandTask rejects unchanged packaged authoring files before browser dispatch", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-unchanged-template-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const taskPath = join(directory, "task.mjs");
-  await writeFile(
-    taskPath,
-    await readFile(new URL(
-      "../skills/npc-moneyhand/assets/disposable-task.mjs",
-      import.meta.url,
-    )),
-  );
-  const progressEvents = [];
   let browserRequests = 0;
   let visualInspections = 0;
   const moneyhand = {
@@ -97,20 +88,28 @@ test("runMoneyHandTask rejects an unchanged packaged template before browser dis
     async inspectTaskBlocker() { visualInspections += 1; },
   };
 
-  await assert.rejects(
-    runMoneyHandTask({
-      moneyhand,
-      taskPath,
-      onProgress: async (event) => progressEvents.push(event),
-    }),
-    (error) => error?.code === "TASK_TEMPLATE_NOT_IMPLEMENTED"
-      && error?.details?.actionDispatched === false
-      && error?.details?.cleanupComplete === true,
-  );
+  for (const [index, relativePath] of [
+    "../skills/npc-moneyhand/assets/disposable-task.mjs",
+    "../skills/npc-moneyhand/references/bounded-file-task.example.mjs",
+  ].entries()) {
+    const taskPath = join(directory, `task-${index}.mjs`);
+    await writeFile(taskPath, await readFile(new URL(relativePath, import.meta.url)));
+    const progressEvents = [];
+    await assert.rejects(
+      runMoneyHandTask({
+        moneyhand,
+        taskPath,
+        onProgress: async (event) => progressEvents.push(event),
+      }),
+      (error) => error?.code === "TASK_TEMPLATE_NOT_IMPLEMENTED"
+        && error?.details?.actionDispatched === false
+        && error?.details?.cleanupComplete === true,
+    );
+    assert.equal(progressEvents.some((event) => event.state === "visual_fallback"), false);
+    assert.equal(progressEvents.at(-1).state, "failed");
+  }
   assert.equal(browserRequests, 0);
   assert.equal(visualInspections, 0);
-  assert.equal(progressEvents.some((event) => event.state === "visual_fallback"), false);
-  assert.equal(progressEvents.at(-1).state, "failed");
 });
 
 test("runMoneyHandTask automatically attaches visual evidence to page-operation failures", async (t) => {
@@ -446,16 +445,22 @@ test("runMoneyHandTask captures an incomplete terminal result before closing its
     },
   };
 
+  let final;
   const result = await runMoneyHandTask({
     moneyhand,
     taskPath,
     onProgress: async (event) => progressEvents.push(event),
+    onFinal: (value) => { final = value; },
   });
   assert.equal(result.outcome.status, "incomplete");
   assert.equal(result.visualFallback.captured, true);
   assert.equal(result.visualFallback.trigger.code, "EXPECTED_RECORD_MISSING");
   assert.equal(progressEvents.some((event) => event.phase === "terminal"), true);
   assert.equal(progressEvents.at(-1).state, "completed");
+  assert.equal(final.taskSummary.state, "incomplete");
+  assert.equal(final.taskSummary.visual.captured, true);
+  assert.equal(final.taskSummary.visual.path, join(directory, "terminal-incomplete.png"));
+  assert.equal(final.taskSummary.nextAction, "inspect-visual-fallback");
 });
 
 test("runMoneyHandTask does not repeat a successful template terminal screenshot after cleanup", async (t) => {
