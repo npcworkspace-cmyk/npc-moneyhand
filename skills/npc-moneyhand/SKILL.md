@@ -115,10 +115,12 @@ stop instead of inventing an alternative installation.
 Read `references/task-runtime.md` before writing or running task logic. It is the short, single normal
 task path and contains copyable argument shapes. Do not preload recovery or full API references.
 Never run `assets/disposable-task.mjs`, `assets/specialized-task.mjs`, or an unchanged copy. Copy the
-appropriate template to a task-owned temporary path, remove the `MONEYHAND_TASK_TEMPLATE` sentinel,
-and replace only its `executeTask()` function; preserve the fixed `run()` lifecycle. The controller
-rejects an unchanged template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch; implement it
-instead of retrying. For a first multi-page or file-producing task, follow the complete platform-neutral
+appropriate template to a task-owned temporary path and replace only its `executeTask()` function;
+preserve the fixed `run()` lifecycle. There is no sentinel or authoring flag to edit: the controller
+rejects a normalized source-identical template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch.
+Write non-empty task arguments to an absolute UTF-8 JSON file and invoke `--args-file`; never hand-escape
+inline JSON in a shell command.
+For a first multi-page or file-producing task, follow the complete platform-neutral
 `references/bounded-file-task.example.mjs` pattern instead of inventing an output loop. For every
 page-side DOM read, use the template's `pageExpression(pageFunction,input)` helper; never hand-build an
 `expression` template string. When output records must preserve page order, copy

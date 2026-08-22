@@ -93,7 +93,7 @@ moneyhand
 moneyhand --connect [browser options]
 moneyhand --call <extension-method> [--params-json <json>] [browser options]
 moneyhand --once [connection options]
-moneyhand --task <absolute-module.mjs> [--args-json <json>]
+moneyhand --task <absolute-module.mjs> [--args-file <absolute-json-file>]
 moneyhand --task-last
 moneyhand --task-status <task-execution-id>
 moneyhand --task-follow <task-execution-id>
@@ -196,8 +196,11 @@ checkpoint 进度与 `finally` 收尾。不要再写一层 wrapper；只替换�
 执行：
 
 ~~~text
-moneyhand --task "C:\absolute\task.mjs" --args-json "{\"job\":\"status\"}"
+moneyhand --task "C:\absolute\task.mjs" --args-file "C:\absolute\task-args.json"
 ~~~
+
+把非空任务参数写入绝对路径 UTF-8 JSON 文件；不要在 PowerShell、cmd 或 POSIX shell 中手工转义
+内联 JSON。`--args-json` 仅保留程序化 argv 调用兼容，不是 Agent 的正常命令行路径。
 
 `--task` 默认预算 30 分钟，可用 `--task-timeout-ms` 显式提高，最大 24 小时。批量专项
 Skill 应分批 checkpoint；超时后读取唯一 `TASK_TIMEOUT` 结果中的 `timeoutMs`、

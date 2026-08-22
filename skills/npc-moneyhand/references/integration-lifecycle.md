@@ -138,7 +138,7 @@ For multi-step local work, copy `assets/disposable-task.mjs` outside the Skill, 
 bounded task-work placeholder, and run:
 
 ```text
-node scripts/moneyhand.mjs --task <absolute-task.mjs> --args-json <json>
+node scripts/moneyhand.mjs --task <absolute-task.mjs> --args-file <absolute-task-args.json>
 ```
 
 Export `run({ moneyhand, signal, args, progress, taskExecutionId })`. Call `progress()` at every bounded batch or

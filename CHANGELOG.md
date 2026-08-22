@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.1] - 2026-08-22
+
+- Detect unchanged authoring templates by normalized source fingerprint, so Agents edit only `executeTask()` and never remove a sentinel or authoring flag manually.
+- Keep unchanged disposable, specialized, and full-example files fail-closed before browser dispatch while accepting implemented legacy copies that still export the old sentinel.
+- Add an absolute UTF-8 `--args-file` task input as the shell-safe default across Windows, macOS, and Linux while retaining `--args-json` for programmatic compatibility.
+
 ## [1.2.0] - 2026-08-22
 
 - Make `executeTask()` the only editable function in disposable and specialized task templates while preserving the fixed lifecycle and cleanup wrapper.

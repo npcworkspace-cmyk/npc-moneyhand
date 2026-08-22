@@ -50,6 +50,12 @@ test("CLI --task runs a complete disposable module through one MoneyHand lifecyc
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-task-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const taskPath = join(directory, "task.mjs");
+  const argsPath = join(directory, "task-args.json");
+  const expectedArgs = {
+    source: "cli",
+    windowsPath: String.raw`C:\MoneyHand\output.jsonl`,
+  };
+  await writeFile(argsPath, `${"\uFEFF"}${JSON.stringify(expectedArgs)}`, "utf8");
   await writeFile(taskPath, [
     "export async function run({ moneyhand, args, signal }) {",
     "  const terminal = await moneyhand.request({ method: 'target.list', params: {} }, { signal });",
@@ -60,8 +66,8 @@ test("CLI --task runs a complete disposable module through one MoneyHand lifecyc
     moneyhandPath,
     "--task",
     taskPath,
-    "--args-json",
-    JSON.stringify({ source: "cli" }),
+    "--args-file",
+    argsPath,
     "--internal-test-port",
     "0",
     "--connect-timeout-ms",
@@ -119,7 +125,7 @@ test("CLI --task runs a complete disposable module through one MoneyHand lifecyc
   assert.equal(code, 0);
   const result = messages.find((message) => message.id === "task");
   assert.equal(result.ok, true);
-  assert.deepEqual(result.value.args, { source: "cli" });
+  assert.deepEqual(result.value.args, expectedArgs);
   assert.equal(result.value.terminal.result.targets[0].tabId, 42);
   const progress = messages.filter((message) => message.event === "moneyhand.task_progress");
   assert.equal(progress[0].state, "started");
@@ -150,6 +156,47 @@ async function runCli(argumentsList, timeoutMs = 5_000) {
       : [],
   };
 }
+
+test("CLI --args-file fails closed on ambiguous, relative, invalid, or oversized input", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-cli-args-file-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  const validPath = join(directory, "valid.json");
+  const invalidPath = join(directory, "invalid.json");
+  const oversizedPath = join(directory, "oversized.json");
+  await Promise.all([
+    writeFile(taskPath, "export async function run() { return {}; }\n", "utf8"),
+    writeFile(validPath, "{}\n", "utf8"),
+    writeFile(invalidPath, "{sensitive-invalid-json}\n", "utf8"),
+    writeFile(oversizedPath, `{"value":"${"x".repeat(1024 * 1024)}"}\n`, "utf8"),
+  ]);
+  const cases = [
+    {
+      args: ["--task", taskPath, "--args-file", "relative.json"],
+      message: /--args-file must be an absolute path/u,
+    },
+    {
+      args: ["--task", taskPath, "--args-file", validPath, "--args-json", "{}"],
+      message: /Use exactly one task argument source/u,
+    },
+    {
+      args: ["--task", taskPath, "--args-file", invalidPath],
+      message: /--args-file must contain valid UTF-8 JSON/u,
+    },
+    {
+      args: ["--task", taskPath, "--args-file", oversizedPath],
+      message: /--args-file must be a regular JSON file no larger than 1048576 bytes/u,
+    },
+  ];
+  for (const fixture of cases) {
+    const result = await runCli(fixture.args);
+    assert.equal(result.code, 1);
+    const fatal = result.messages.find((message) => message.type === "fatal");
+    assert.equal(fatal?.error?.code, "INVALID_OPTION");
+    assert.match(fatal.error.message, fixture.message);
+    assert.doesNotMatch(JSON.stringify(fatal), /sensitive-invalid-json/u);
+  }
+});
 
 async function readTextEventually(path, timeoutMs = 3_000) {
   const deadline = Date.now() + timeoutMs;
@@ -194,7 +241,7 @@ test("CLI --ensure is idempotent under concurrent startup", async (t) => {
     assert.equal(envelope.value.port, controllerPort);
     assert.equal(envelope.value.protocol, "npc-moneyhand-controller/2");
     assert.equal(envelope.value.product, "npc-moneyhand");
-    assert.equal(envelope.value.version, "1.2.0");
+    assert.equal(envelope.value.version, "1.2.1");
     assert.match(envelope.value.build, /^[a-f0-9]{64}$/u);
     assert.match(envelope.value.sourceId, /^[a-f0-9]{64}$/u);
     assert.match(envelope.value.instanceNonce, /^[a-f0-9-]{36}$/u);
@@ -343,7 +390,7 @@ test("CLI --stop preempts an unresponsive isolated task and releases its Node ha
     profile: "npc-stop-task-cli",
     instanceId: "instance_stop_task_cli",
     bootId: "boot_stop_task_cli",
-    version: "1.2.0",
+    version: "1.2.1",
     auth: { mode: "none" },
     focus: { windowId: 9, focused: true, lastFocusedAt: 9 },
     browser: { platform: { os: "test" } },
@@ -430,7 +477,7 @@ test("CLI resident controller keeps the extension connection across connect and 
     profile: "npc-resident-cli",
     instanceId: "instance_resident_cli",
     bootId: "boot_resident_cli",
-    version: "1.2.0",
+    version: "1.2.1",
     auth: { mode: "none" },
     focus: { windowId: 3, focused: true, lastFocusedAt: 3 },
     browser: { platform: { os: "test" } },
@@ -644,7 +691,7 @@ test("CLI task survives client loss and a fresh Agent follows its private journa
     profile: "npc-reattach-cli",
     instanceId: "instance_reattach_cli",
     bootId: "boot_reattach_cli",
-    version: "1.2.0",
+    version: "1.2.1",
     auth: { mode: "none" },
     focus: { windowId: 5, focused: true, lastFocusedAt: 5 },
     browser: { platform: { os: "test" } },
@@ -762,7 +809,7 @@ test("CLI exits nonzero when a task result is ok false", async (t) => {
   opened.client.sendJson({
     v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
     profile: "npc-failure-cli", instanceId: "instance_failure_cli", bootId: "boot_failure_cli",
-    version: "1.2.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    version: "1.2.1", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
     browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
   });
   await opened.client.nextJson();
@@ -815,7 +862,7 @@ test("CLI --task emits one bounded TASK_TIMEOUT when a module ignores abort", as
   opened.client.sendJson({
     v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
     profile: "npc-timeout-cli", instanceId: "instance_timeout_cli", bootId: "boot_timeout_cli",
-    version: "1.2.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    version: "1.2.1", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
     browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
   });
   await opened.client.nextJson();
@@ -864,7 +911,7 @@ test("CLI --connect returns one bounded ready result on its isolated test port",
     profile: "npc-connect-cli",
     instanceId: "instance_connect_cli",
     bootId: "boot_connect_cli",
-    version: "1.2.0",
+    version: "1.2.1",
     auth: { mode: "none" },
     focus: { windowId: 2, focused: true, lastFocusedAt: 2 },
     browser: { platform: { os: "test" } },

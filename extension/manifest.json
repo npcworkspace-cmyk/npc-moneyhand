@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "npc-moneyhand",
   "description": "A thin, WS-only Chrome execution hand for local AI agents.",
-  "version": "1.2.0",
-  "version_name": "1.2.0",
+  "version": "1.2.1",
+  "version_name": "1.2.1",
   "minimum_chrome_version": "125",
   "permissions": [
     "alarms",

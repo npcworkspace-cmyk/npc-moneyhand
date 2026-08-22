@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter, once, setMaxListeners } from "node:events";
-import { realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { arch as osArch, platform as osPlatform, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
@@ -158,6 +158,8 @@ const MAX_TASK_VISUAL_SILENCE_MS = 5 * 60_000;
 const MAX_PARALLEL_TASK_REQUESTS = 64;
 const MAX_TASK_REQUEST_CONCURRENCY = 16;
 const MAX_TASK_EVALUATION_EXPRESSION_BYTES = 1024 * 1024;
+const MAX_TASK_AUTHORING_SOURCE_BYTES = 2 * 1024 * 1024;
+const MAX_TASK_ARGS_FILE_BYTES = 1024 * 1024;
 const MAX_AUTOMATIC_VISUAL_FALLBACKS = 120;
 const TASK_FOLLOW_POLL_MS = 500;
 const TASK_CONCURRENT_VISUAL_OBSERVATION = Symbol("task-concurrent-visual-observation");
@@ -2355,6 +2357,13 @@ export class MoneyHand extends EventEmitter {
         },
         taskModule: {
           flag: "--task",
+          preferredArgsFlag: "--args-file",
+          inlineArgsCompatibilityFlag: "--args-json",
+          argsFile: {
+            path: "absolute-existing-regular-json-file",
+            encoding: "utf-8",
+            maximumBytes: MAX_TASK_ARGS_FILE_BYTES,
+          },
           requiredExport: "run",
           signature: "run({ moneyhand, signal, args, progress, taskExecutionId })",
           security: "trusted-local-code",
@@ -2367,6 +2376,9 @@ export class MoneyHand extends EventEmitter {
             template: "assets/disposable-task.mjs",
             onlyEditableFunction: "executeTask",
             fixedLifecycleMustBePreserved: true,
+            unchangedTemplateDetection: "normalized-source-fingerprint",
+            manualSentinelRemovalRequired: false,
+            taskArgsInput: "absolute-utf8-json-file-via---args-file",
             executeTaskReturn: "{outcome,output?}",
             bulkOutput: "user-authorized-file-plus-small-manifest",
             pageExpressionHelper: "pageExpression(pageFunction,input)",
@@ -2701,6 +2713,9 @@ export class MoneyHand extends EventEmitter {
           template: "assets/disposable-task.mjs",
           onlyEditableFunction: "executeTask",
           fixedLifecycleMustBePreserved: true,
+          unchangedTemplateDetection: "normalized-source-fingerprint",
+          manualSentinelRemovalRequired: false,
+          taskArgsInput: "absolute-utf8-json-file-via---args-file",
           executeTaskReturn: "{outcome,output?}",
           terminalValueField: "value",
           bulkOutput: "user-authorized-file-plus-small-manifest",
@@ -8353,11 +8368,24 @@ function parseCliOptions(argv) {
         values.taskFollow = value;
         break;
       case "--args-json":
-        try {
-          values.taskArgs = JSON.parse(value);
-        } catch {
-          throw new MoneyHandError("INVALID_OPTION", "--args-json must be valid JSON");
+        if (values.taskArgsOption) {
+          throw new MoneyHandError(
+            "INVALID_OPTION",
+            "Use exactly one task argument source: --args-file or --args-json",
+          );
         }
+        values.taskArgs = parseTaskArgsJson(value, "--args-json");
+        values.taskArgsOption = "--args-json";
+        break;
+      case "--args-file":
+        if (values.taskArgsOption) {
+          throw new MoneyHandError(
+            "INVALID_OPTION",
+            "Use exactly one task argument source: --args-file or --args-json",
+          );
+        }
+        values.taskArgs = readTaskArgsFile(value);
+        values.taskArgsOption = "--args-file";
         break;
       case "--call":
         values.callMethod = value;
@@ -8412,8 +8440,8 @@ function parseCliOptions(argv) {
   if (values.callParams !== undefined && !values.callMethod) {
     throw new MoneyHandError("INVALID_OPTION", "--params-json requires --call or --connect");
   }
-  if (values.taskArgs !== undefined && !values.taskPath) {
-    throw new MoneyHandError("INVALID_OPTION", "--args-json requires --task");
+  if (values.taskArgsOption && !values.taskPath) {
+    throw new MoneyHandError("INVALID_OPTION", `${values.taskArgsOption} requires --task`);
   }
   if (values.taskTimeoutMs !== undefined && !values.taskPath) {
     throw new MoneyHandError("INVALID_OPTION", "--task-timeout-ms requires --task");
@@ -8428,6 +8456,45 @@ function parseCliOptions(argv) {
     }
   }
   return values;
+}
+
+function parseTaskArgsJson(source, option) {
+  try {
+    return JSON.parse(String(source).replace(/^\uFEFF/u, ""));
+  } catch {
+    throw new MoneyHandError("INVALID_OPTION", `${option} must contain valid UTF-8 JSON`);
+  }
+}
+
+function readTaskArgsFile(path) {
+  if (!isAbsolute(path)) {
+    throw new MoneyHandError("INVALID_OPTION", "--args-file must be an absolute path");
+  }
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch {
+    throw new MoneyHandError("INVALID_OPTION", "--args-file must identify an existing local JSON file");
+  }
+  if (!stats.isFile() || stats.size > MAX_TASK_ARGS_FILE_BYTES) {
+    throw new MoneyHandError(
+      "INVALID_OPTION",
+      `--args-file must be a regular JSON file no larger than ${MAX_TASK_ARGS_FILE_BYTES} bytes`,
+    );
+  }
+  let source;
+  try {
+    source = readFileSync(path, "utf8");
+  } catch {
+    throw new MoneyHandError("INVALID_OPTION", "--args-file could not be read as UTF-8 JSON");
+  }
+  if (Buffer.byteLength(source, "utf8") > MAX_TASK_ARGS_FILE_BYTES) {
+    throw new MoneyHandError(
+      "INVALID_OPTION",
+      `--args-file must be no larger than ${MAX_TASK_ARGS_FILE_BYTES} bytes`,
+    );
+  }
+  return parseTaskArgsJson(source, "--args-file");
 }
 
 export function createMoneyHand(options = {}) {
@@ -9017,7 +9084,35 @@ function taskWorkerError(value, fallbackCode = "MONEYHAND_TASK_FAILED") {
   return error;
 }
 
-function taskWorkerRuntime({ taskModuleUrl, moneyhand, signal, args, progress, taskExecutionId }) {
+const TASK_AUTHORING_TEMPLATE_DIGESTS = new Set([
+  new URL("../assets/disposable-task.mjs", import.meta.url),
+  new URL("../assets/specialized-task.mjs", import.meta.url),
+  new URL("../references/bounded-file-task.example.mjs", import.meta.url),
+].map((url) => createHash("sha256")
+  .update(readFileSync(url, "utf8").replace(/\r\n?/gu, "\n"))
+  .digest("hex")));
+
+function unchangedTaskAuthoringFile(taskPath) {
+  try {
+    if (statSync(taskPath).size > MAX_TASK_AUTHORING_SOURCE_BYTES) return false;
+    const digest = createHash("sha256")
+      .update(readFileSync(taskPath, "utf8").replace(/\r\n?/gu, "\n"))
+      .digest("hex");
+    return TASK_AUTHORING_TEMPLATE_DIGESTS.has(digest);
+  } catch {
+    return false;
+  }
+}
+
+function taskWorkerRuntime({
+  taskModuleUrl,
+  unchangedTaskTemplate,
+  moneyhand,
+  signal,
+  args,
+  progress,
+  taskExecutionId,
+}) {
   let worker;
   let finishing;
   let readySettled = false;
@@ -9043,7 +9138,13 @@ function taskWorkerRuntime({ taskModuleUrl, moneyhand, signal, args, progress, t
         .map((method) => [method, moneyhand[method]()]),
     );
     worker = new Worker(workerPath, {
-      workerData: { taskModuleUrl, args, taskExecutionId, synchronousMethods },
+      workerData: {
+        taskModuleUrl,
+        unchangedTaskTemplate,
+        args,
+        taskExecutionId,
+        synchronousMethods,
+      },
     });
   } catch (error) {
     rejectOutcome(new MoneyHandError(
@@ -9208,6 +9309,7 @@ export async function runMoneyHandTask(options = {}) {
     throw new MoneyHandError("INVALID_TASK", "taskPath must identify an existing local module");
   }
   const taskModuleUrl = `${pathToFileURL(taskPath).href}?task=${randomUUID()}`;
+  const unchangedTaskTemplate = unchangedTaskAuthoringFile(taskPath);
   const timeoutMs = boundedInteger(
     input.timeoutMs,
     10,
@@ -9638,6 +9740,7 @@ export async function runMoneyHandTask(options = {}) {
       });
       taskRuntime = taskWorkerRuntime({
         taskModuleUrl,
+        unchangedTaskTemplate,
         moneyhand: scopedMoneyHand,
         signal: taskController.signal,
         args: input.args,
@@ -10865,6 +10968,7 @@ async function main(cliOutput) {
       "  --params-json <json>",
       "  --task <absolute-module.mjs>",
       "  --task-timeout-ms <10-86400000>",
+      "  --args-file <absolute-json-file>  Preferred for non-empty task arguments",
       "  --args-json <json>",
       "  --task-last  Read the latest private task execution status",
       "  --task-status <task-execution-id>",

@@ -6,12 +6,12 @@ guess browser IDs, start another controller, or rewrite lifecycle code from memo
 ## Fixed authoring route
 
 1. Copy `assets/disposable-task.mjs` to a task-owned absolute path.
-2. Remove its exported `MONEYHAND_TASK_TEMPLATE` sentinel and replace only `executeTask()`. Do not edit
-   `run()`, `beginTaskContext()`, exception handling, visual fallback, or `completeTaskContext()`.
-3. Use the injected `task.taskSpaceId` and `task.tabId`; later browser focus never retargets the task.
-4. Default to `behavior:"raw"`; pass `args.behavior:"human"` only for genuinely human-style input.
-5. Call `progress({phase,message,current,total,checkpoint})` after every bounded batch or checkpoint.
-6. Return exactly `{outcome,output?}` from `executeTask()`. Map every explicit user acceptance
+2. Replace only `executeTask()`; there is no sentinel or flag. A normalized source-identical template is rejected; preserve `run()` and cleanup.
+3. Write task arguments to one absolute UTF-8 JSON file and use `--args-file`; never inline non-empty JSON in a shell command.
+4. Use the injected `task.taskSpaceId` and `task.tabId`; later browser focus never retargets the task.
+5. Default to `behavior:"raw"`; pass `args.behavior:"human"` only for genuinely human-style input.
+6. Call `progress({phase,message,current,total,checkpoint})` after every bounded batch or checkpoint.
+7. Return exactly `{outcome,output?}` from `executeTask()`. Map every explicit user acceptance
    condition to its own machine-checkable requirement; never merge record count, page count, order,
    required IDs, or required field values into one generic check. Wrapper cleanup failure downgrades completion.
 
@@ -23,7 +23,7 @@ collect every bounded match and never invent a per-page cardinality. For record 
 Run from the Skill root with an absolute task path:
 
 ```text
-node scripts/moneyhand.mjs --task "ABSOLUTE_PATH_TO_TASK_MODULE.mjs" --args-json "{}"
+node scripts/moneyhand.mjs --task "ABSOLUTE_PATH_TO_TASK_MODULE.mjs" --args-file "ABSOLUTE_PATH_TO_TASK_ARGS.json"
 ```
 
 This is a foreground stdout stream. Keep consuming it through the terminal `id:"task"` result. Never

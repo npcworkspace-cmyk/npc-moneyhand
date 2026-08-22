@@ -106,6 +106,8 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(workflows, /method: "cdp\.send",[\s\S]*method: "Runtime\.evaluate"/u);
   assert.match(workflows, /Raw CDP keeps its native nested result/u);
   assert.match(runtime, /--task "ABSOLUTE_PATH_TO_TASK_MODULE\.mjs"/u);
+  assert.match(runtime, /--args-file "ABSOLUTE_PATH_TO_TASK_ARGS\.json"/u);
+  assert.doesNotMatch(runtime, /--args-json/u);
   assert.match(runtime, /Deduplicate by canonical identifier/u);
   for (const text of [runtime, await readFile(SKILL_PATH, "utf8")]) {
     assert.match(text, /path\/byte count proves transport only/u);
@@ -113,7 +115,10 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   }
   assert.match(recovery, /supplies its `AbortSignal` automatically/u);
   assert.match(runtime, /timeoutMs: 30_000,[\s\S]*signal,/u);
-  assert.match(runtime, /replace only `executeTask\(\)`/u);
+  assert.match(runtime, /replace only `executeTask\(\)`/iu);
+  assert.match(runtime, /there is no sentinel or flag/iu);
+  assert.match(runtime, /normalized\s+source-identical template/u);
+  assert.match(runtime, /never inline non-empty JSON in a shell command/u);
   assert.match(runtime, /terminal[\s\S]*`id:"task"\.value`/u);
   assert.match(runtime, /must not be used as the bulk-data payload/u);
   assert.match(runtime, /\[A-Za-z0-9\._:-\]/u);

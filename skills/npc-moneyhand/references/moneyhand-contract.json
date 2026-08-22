@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "npc-moneyhand",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "controlProtocol": "npc-moneyhand-control/1",
   "wireProtocol": "npc-moneyhand/2",
   "runtime": {
@@ -564,6 +564,9 @@
       "template": "assets/disposable-task.mjs",
       "onlyEditableFunction": "executeTask",
       "fixedLifecycleMustBePreserved": true,
+      "unchangedTemplateDetection": "normalized-source-fingerprint",
+      "manualSentinelRemovalRequired": false,
+      "taskArgsInput": "absolute-utf8-json-file-via---args-file",
       "executeTaskReturn": "{outcome,output?}",
       "terminalValueField": "value",
       "bulkOutput": "user-authorized-file-plus-small-manifest",
@@ -851,6 +854,13 @@
     },
     "taskModule": {
       "flag": "--task",
+      "preferredArgsFlag": "--args-file",
+      "inlineArgsCompatibilityFlag": "--args-json",
+      "argsFile": {
+        "path": "absolute-existing-regular-json-file",
+        "encoding": "utf-8",
+        "maximumBytes": 1048576
+      },
       "requiredExport": "run",
       "signature": "run({ moneyhand, signal, args, progress, taskExecutionId })",
       "security": "trusted-local-code",
@@ -863,6 +873,9 @@
         "template": "assets/disposable-task.mjs",
         "onlyEditableFunction": "executeTask",
         "fixedLifecycleMustBePreserved": true,
+        "unchangedTemplateDetection": "normalized-source-fingerprint",
+        "manualSentinelRemovalRequired": false,
+        "taskArgsInput": "absolute-utf8-json-file-via---args-file",
         "executeTaskReturn": "{outcome,output?}",
         "bulkOutput": "user-authorized-file-plus-small-manifest",
         "pageExpressionHelper": "pageExpression(pageFunction,input)",
@@ -910,7 +923,7 @@
     "builtInController": {
       "protocol": "npc-moneyhand-controller/2",
       "product": "npc-moneyhand",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "endpoint": "127.0.0.1:19845",
       "startup": "implicit-on-connect-call-or-task",
       "installation": "bundled-in-the-skill-no-separate-software",

@@ -2,9 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 
-// Complete platform-neutral example. Copy this file to a task-owned path, remove this
-// sentinel, and adapt collectPage() plus the explicit user acceptance requirements.
-export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";
+// Complete platform-neutral example. Copy this file to a task-owned path and adapt
+// collectPage() plus the explicit user acceptance requirements. An unchanged copy is rejected.
 
 function taskError(error) {
   return {

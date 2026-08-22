@@ -88,12 +88,17 @@ test("runMoneyHandTask rejects unchanged packaged authoring files before browser
     async inspectTaskBlocker() { visualInspections += 1; },
   };
 
-  for (const [index, relativePath] of [
-    "../skills/npc-moneyhand/assets/disposable-task.mjs",
-    "../skills/npc-moneyhand/references/bounded-file-task.example.mjs",
+  for (const [index, fixture] of [
+    { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "native" },
+    { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "lf" },
+    { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "crlf" },
+    { path: "../skills/npc-moneyhand/references/bounded-file-task.example.mjs", endings: "native" },
   ].entries()) {
     const taskPath = join(directory, `task-${index}.mjs`);
-    await writeFile(taskPath, await readFile(new URL(relativePath, import.meta.url)));
+    let source = await readFile(new URL(fixture.path, import.meta.url), "utf8");
+    if (fixture.endings === "lf") source = source.replace(/\r\n?/gu, "\n");
+    if (fixture.endings === "crlf") source = source.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\r\n");
+    await writeFile(taskPath, source, "utf8");
     const progressEvents = [];
     await assert.rejects(
       runMoneyHandTask({
@@ -110,6 +115,32 @@ test("runMoneyHandTask rejects unchanged packaged authoring files before browser
   }
   assert.equal(browserRequests, 0);
   assert.equal(visualInspections, 0);
+});
+
+test("runMoneyHandTask accepts an implemented legacy copy without manual sentinel removal", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-legacy-sentinel-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, [
+    'export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";',
+    "export async function run() {",
+    "  return { outcome: { status: 'complete', requirements: [",
+    "    { id: 'implemented', satisfied: true, expected: true, actual: true },",
+    "  ], evidence: [] } };",
+    "}",
+  ].join("\n"), "utf8");
+  let final;
+  const value = await runMoneyHandTask({
+    moneyhand: {
+      async request() {},
+      ownedTaskWindowIds() { return []; },
+      async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
+    },
+    taskPath,
+    onFinal(result) { final = result; },
+  });
+  assert.equal(value.outcome.status, "complete");
+  assert.equal(final.completionGate.passed, true);
 });
 
 test("runMoneyHandTask automatically attaches visual evidence to page-operation failures", async (t) => {

@@ -18,8 +18,8 @@ const packageJson = readJson("package.json");
 const manifest = readJson("extension/manifest.json");
 
 if (packageJson.name !== "npc-moneyhand") fail("package name must be npc-moneyhand");
-if (packageJson.version !== "1.2.0") {
-  fail("package version must be 1.2.0");
+if (packageJson.version !== "1.2.1") {
+  fail("package version must be 1.2.1");
 }
 if (packageJson.dependencies || packageJson.devDependencies || packageJson.optionalDependencies) {
   fail("npc-moneyhand must not declare external dependencies");
@@ -29,7 +29,7 @@ if (existsSync(join(root, "package-lock.json"))) {
 }
 
 if (manifest.name !== "npc-moneyhand") fail("extension name must be npc-moneyhand");
-if (manifest.version !== "1.2.0") fail("extension version must be 1.2.0");
+if (manifest.version !== "1.2.1") fail("extension version must be 1.2.1");
 if (manifest.version_name !== packageJson.version) {
   fail("manifest version_name must match package version");
 }
@@ -187,6 +187,11 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.automaticConnection?.extensionDistribution?.manualInstallRequired !== true
   || contract.taskRuntime?.authoring?.onlyEditableFunction !== "executeTask"
   || contract.taskRuntime?.authoring?.fixedLifecycleMustBePreserved !== true
+  || contract.taskRuntime?.authoring?.unchangedTemplateDetection
+    !== "normalized-source-fingerprint"
+  || contract.taskRuntime?.authoring?.manualSentinelRemovalRequired !== false
+  || contract.taskRuntime?.authoring?.taskArgsInput
+    !== "absolute-utf8-json-file-via---args-file"
   || contract.taskRuntime?.authoring?.executeTaskReturn !== "{outcome,output?}"
   || contract.taskRuntime?.authoring?.terminalValueField !== "value"
   || contract.taskRuntime?.authoring?.bulkOutput
@@ -247,12 +252,23 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.recoveryEnvelope?.schema !== "npc-moneyhand-task-recovery/1"
   || !contract.transports?.taskModule?.terminalEvidenceFields?.includes("taskSummary")
   || contract.transports?.taskModule?.flag !== "--task"
+  || contract.transports?.taskModule?.preferredArgsFlag !== "--args-file"
+  || contract.transports?.taskModule?.inlineArgsCompatibilityFlag !== "--args-json"
+  || contract.transports?.taskModule?.argsFile?.path
+    !== "absolute-existing-regular-json-file"
+  || contract.transports?.taskModule?.argsFile?.encoding !== "utf-8"
+  || contract.transports?.taskModule?.argsFile?.maximumBytes !== 1048576
   || contract.transports?.taskModule?.signature
     !== "run({ moneyhand, signal, args, progress, taskExecutionId })"
   || contract.transports?.taskModule?.returnedValuePreservedAt
     !== "terminal-id-task.value"
   || contract.transports?.taskModule?.authoring?.onlyEditableFunction !== "executeTask"
   || contract.transports?.taskModule?.authoring?.fixedLifecycleMustBePreserved !== true
+  || contract.transports?.taskModule?.authoring?.unchangedTemplateDetection
+    !== "normalized-source-fingerprint"
+  || contract.transports?.taskModule?.authoring?.manualSentinelRemovalRequired !== false
+  || contract.transports?.taskModule?.authoring?.taskArgsInput
+    !== "absolute-utf8-json-file-via---args-file"
   || contract.transports?.taskModule?.authoring?.pageExpressionHelper
     !== "pageExpression(pageFunction,input)"
   || contract.transports?.taskModule?.authoring?.recordGroupOrderHelper

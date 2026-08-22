@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 
-// Copy this file to a task-owned temporary path. Remove the sentinel and replace only
-// executeTask(); keep run() and its lifecycle unchanged.
-// MoneyHand rejects this sentinel at runtime, including in an unchanged copy.
-export const MONEYHAND_TASK_TEMPLATE = "replace-before-running";
+// Copy this file to a task-owned temporary path and replace only executeTask(); keep
+// run() and its lifecycle unchanged. MoneyHand rejects an unchanged copy by source fingerprint.
 
 export function stableEffectId(prefix, key) {
   const safePrefix = String(prefix ?? "effect")

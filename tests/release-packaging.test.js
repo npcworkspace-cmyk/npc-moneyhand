@@ -208,12 +208,12 @@ test("release build is reproducible, confined, installable and includes an npm R
   const built = await buildAgentRelease({ output: first, conformance: false });
   const repeated = await buildAgentRelease({ output: second, conformance: false });
   assert.equal(built.manifest.schema, "npc-agent-release-manifest/1");
-  assert.deepEqual(built.manifest.suite, { name: "npc-moneyhand", version: "1.2.0" });
+  assert.deepEqual(built.manifest.suite, { name: "npc-moneyhand", version: "1.2.1" });
   assert.equal(built.manifest.packages.length, 1);
   assert.equal(built.manifest.packages[0].package, "npc-moneyhand");
-  assert.equal(built.manifest.packages[0].version, "1.2.0");
-  assert.equal(built.manifest.extension.version, "1.2.0");
-  assert.equal(built.manifest.extension.versionName, "1.2.0");
+  assert.equal(built.manifest.packages[0].version, "1.2.1");
+  assert.equal(built.manifest.extension.version, "1.2.1");
+  assert.equal(built.manifest.extension.versionName, "1.2.1");
   assert.equal(
     built.manifest.extension.archive.path,
     "npc-moneyhand-extension.zip",

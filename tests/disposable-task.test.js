@@ -114,6 +114,7 @@ for (const name of ["disposable-task.mjs", "specialized-task.mjs"]) {
     assert.match(source, /replace only[\s\S]*executeTask\(\)/iu);
     assert.match(source, /TASK_RESULT_CONTRACT_INVALID/u);
     assert.match(source, /output/u);
+    assert.doesNotMatch(source, /MONEYHAND_TASK_TEMPLATE|replace-before-running/u);
   });
 }
 
