@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -66,6 +67,12 @@ test("private task ledger reports running, persists evidence, and closes with on
   });
   assert.equal(artifact.private, true);
   assert.match(artifact.sha256, /^[a-f0-9]{64}$/u);
+  const evidenceBytes = await readFile(artifact.path);
+  assert.equal(artifact.bytes, evidenceBytes.length);
+  assert.equal(
+    artifact.sha256,
+    createHash("sha256").update(evidenceBytes).digest("hex"),
+  );
 
   now += 1_000;
   await ledger.finish({ ok: true, value: { status: "complete" } });
@@ -395,6 +402,121 @@ test("completion gate uses latest receipts, rate circuits, cleanup, and declared
       detail: "not applicable because the task did not claim complete",
     },
   );
+});
+
+test("completion gate derives human behavior and exact task-fact requirements", () => {
+  const collector = new TaskEvidenceCollector({
+    taskExecutionId: "task-facts",
+    startedAtMs: 0,
+  });
+  const expected = [{
+    id: "scroll:gamma",
+    expected: {
+      pageKey: "gamma", deltaY: 180, effect: "input", actionDispatched: true,
+      dispatch: { status: "completed" },
+    },
+  }, {
+    id: "scroll:beta",
+    expected: {
+      pageKey: "beta", deltaY: 260, effect: "input", actionDispatched: true,
+      dispatch: { status: "completed" },
+    },
+  }];
+  const observed = expected.map((entry) => ({
+    id: entry.id,
+    actual: {
+      ...entry.expected,
+      handRequestId: "input-request-1",
+      dispatch: { ...entry.expected.dispatch, handRequestId: "input-request-1" },
+    },
+    evidence: [{ type: "input-receipt" }],
+  }));
+  observed[0].evidence = { type: "input-receipt" };
+  const value = {
+    args: { behavior: "human", acceptance: { taskFacts: expected } },
+    task: { behavior: { mode: "human" } },
+    outcome: {
+      status: "complete",
+      requirements: [{ id: "records", satisfied: true, expected: 6, actual: 6 }],
+      taskFacts: observed,
+    },
+  };
+  const evidence = collector.build({ value, cleanup: { ok: true } });
+  const complete = evaluateTaskCompletion({ value, cleanup: { ok: true }, evidence });
+  assert.equal(complete.passed, true);
+  assert.deepEqual(
+    complete.checks.find((entry) => entry.id === "task-facts-verified"),
+    { id: "task-facts-verified", passed: true, detail: "2/2 task facts observed and matched" },
+  );
+  assert.deepEqual(
+    complete.requirements.map((entry) => [entry.id, entry.satisfied, entry.evidenceCount]),
+    [
+      ["records", true, 0],
+      ["runtime:behavior-mode", true, 0],
+      ["task-fact:scroll:gamma", true, 1],
+      ["task-fact:scroll:beta", true, 1],
+    ],
+  );
+
+  for (const broken of [{
+    ...value,
+    outcome: { ...value.outcome, taskFacts: observed.slice(0, 1) },
+  }, {
+    ...value,
+    outcome: {
+      ...value.outcome,
+      taskFacts: observed.map((entry, index) => index === 0
+        ? { ...entry, actual: { ...entry.actual, deltaY: 999 } }
+        : entry),
+    },
+  }, {
+    ...value,
+    outcome: {
+      ...value.outcome,
+      taskFacts: observed.map((entry, index) => index === 0
+        ? { ...entry, actual: { ...entry.actual, dispatch: { handRequestId: "input-request-1" } } }
+        : entry),
+    },
+  }, {
+    ...value,
+    task: { behavior: { mode: "raw" } },
+  }, {
+    ...value,
+    outcome: {
+      ...value.outcome,
+      taskFacts: [...observed, { id: "scroll:extra", actual: true }],
+    },
+  }, {
+    ...value,
+    outcome: { ...value.outcome, taskFacts: [...observed, observed[0]] },
+  }, {
+    ...value,
+    outcome: {
+      ...value.outcome,
+      taskFacts: observed.map((entry, index) => index === 0
+        ? { ...entry, evidence: "not-an-object" }
+        : entry),
+    },
+  }, {
+    ...value,
+    args: {
+      ...value.args,
+      acceptance: {
+        taskFacts: [{ id: "unicode", expected: "界".repeat(1_400) }],
+      },
+    },
+    outcome: {
+      ...value.outcome,
+      taskFacts: [{ id: "unicode", actual: "界".repeat(1_400) }],
+    },
+  }]) {
+    const brokenEvidence = collector.build({ value: broken, cleanup: { ok: true } });
+    assert.equal(evaluateTaskCompletion({
+      value: broken,
+      cleanup: { ok: true },
+      evidence: brokenEvidence,
+    }).passed, false);
+  }
 });
 
 test("completion gate rejects a bulk output whose file evidence disagrees with its manifest", () => {

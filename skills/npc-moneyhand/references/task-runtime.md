@@ -11,27 +11,28 @@ guess browser IDs, start another controller, or rewrite lifecycle code from memo
 4. Use the injected `task.taskSpaceId` and `task.tabId`; later browser focus never retargets the task.
 5. Default to `behavior:"raw"`; pass `args.behavior:"human"` only for genuinely human-style input.
 6. Call `progress({phase,message,current,total,checkpoint})` after every bounded batch or checkpoint.
-7. Return exactly `{outcome,output?}` from `executeTask()`. Map every explicit user acceptance
-   condition to its own machine-checkable requirement; never merge record count, page count, order,
-   required IDs, or required field values into one generic check. Omit unknown expectations; never guess them.
-   Wrapper cleanup failure downgrades completion.
+7. Return exactly `{outcome,output?}` from `executeTask()`. Map every explicit user acceptance condition to its own machine-checkable requirement;
+   never merge record count, page count, order, required IDs, or required field values. Omit unknown expectations; never guess them. For custom
+   action facts, use the `taskFacts` contract below; evidence alone is not a requirement. Wrapper cleanup failure downgrades completion.
 
 The runnable reference is one-page-to-many-records. `acceptance` is an allowlist of explicit facts,
 not a checklist to fill. Never infer `pageIds` from a page key, URL, title, or this example:
 
 ```json
-{"pages":[{"id":"alpha","url":"https://example.test/alpha"}],
+{"pages":[{"pageKey":"alpha","url":"https://example.test/alpha","taskData":{"scrollDeltaY":305}}],
  "outputPath":"ABSOLUTE_OUTPUT.jsonl","manifestPath":"ABSOLUTE_MANIFEST.json",
- "checkpointPath":"ABSOLUTE_CHECKPOINT.json","behavior":"raw",
+ "checkpointPath":"ABSOLUTE_CHECKPOINT.json","behavior":"human",
  "acceptance":{"recordCount":2,"recordsByPage":{"alpha":2},
- "requiredFields":["id","pageKey","text","url"]}}
+ "requiredFields":["recordId","pageKey","title","body","sourceUrl"]}}
 ```
-
+The source-identical reference validates all JSON before opening a task window. Use `pageKey` for each page (`id` remains a legacy alias; supplying both fails). `taskData.scrollDeltaY` is a built-in non-zero integer from -100000 to 100000: after navigation it performs the real input scroll, returns the measured receipt, and automatically proves `scroll:page-N`. Do not redeclare that fact or edit the module. Other page-specific values remain available as `page.taskData`; unknown sibling keys fail instead of disappearing.
 If the user explicitly says gamma's page ID must equal `literal-${POST_ID}`, add only
 `"pageIds":{"gamma":"literal-${POST_ID}"}`. Otherwise omit `pageIds`. Unknown acceptance keys fail closed.
-Each supplied count, page ID, and field becomes its own completion-gate requirement. Adapt the extractor only when the generic `[data-record], .record-card` selector or fields
+Each supplied count, page ID, and field becomes its own completion-gate requirement. `requiredFields` means every record owns a meaningful value: nonblank string, finite number, boolean, or nonempty array/object; a merely present empty field fails. Adapt the extractor only when the generic `[data-record], .record-card` selector or fields
 do not fit. Collect every bounded match; never invent a per-page cardinality. Keep page order with
 `recordGroupOrderRequirement(records, expectedPageKeys)`; never expand IDs using assumed per-page counts.
+The reference directly emits `recordId`, `pageKey`, `pageId`, `title:document.title`, `body:element.innerText`, `sourceUrl:location.href`, and `index`. Never guess a new selector merely to rename a field. Use another record-level selector only after the page proves that element exists; otherwise return incomplete instead of manufacturing an empty or misleading value.
+For custom actions not built into the reference, put one bounded `{id,expected}` in `args.acceptance.taskFacts`; after the real operation returns, put the same ID in `outcome.taskFacts` as `{id,actual,evidence?}`. IDs match exactly; expected objects are recursive subsets of actual objects. Arrays and primitives remain exact. Requested `human` behavior also derives `runtime:behavior-mode`.
 
 Run from the Skill root with an absolute task path:
 

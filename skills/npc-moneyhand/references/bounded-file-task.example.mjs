@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
@@ -5,7 +6,9 @@ import { dirname, isAbsolute } from "node:path";
 // Runnable platform-neutral reference task. Copy it to a task-owned path. When the generic
 // selectors fit, keep the source unchanged. In args.acceptance, declare only expectations explicitly
 // supplied by the user or authoritative task input; omit unknown values instead of guessing them.
-// Otherwise adapt collectPage() while preserving the fixed run() lifecycle.
+// Put custom per-page input only under page.taskData; the parser preserves that bounded object and
+// rejects silent sibling fields. taskData.scrollDeltaY is native: args alone trigger a proven scroll,
+// so an Agent never edits lifecycle code for that common action. Otherwise adapt only collectPage().
 
 function taskError(error) {
   return {
@@ -38,6 +41,32 @@ function stableRequirementId(prefix, key) {
   return `${prefix}:${visible}:${digest}`;
 }
 
+function nativeScrollFact(page, index) {
+  if (!Object.hasOwn(page.taskData, "scrollDeltaY")) return null;
+  return {
+    id: `scroll:page-${index + 1}`,
+    expected: {
+      pageKey: page.id,
+      deltaY: page.taskData.scrollDeltaY,
+      effect: "input",
+      actionDispatched: true,
+    },
+  };
+}
+
+function boundedFactValue(value, label) {
+  let encoded;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    fail("INVALID_TASK_ARGS", `${label} must be bounded JSON`);
+  }
+  if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > 4_096) {
+    fail("INVALID_TASK_ARGS", `${label} must be bounded JSON`);
+  }
+  return JSON.parse(encoded);
+}
+
 export function pageExpression(pageFunction, input) {
   if (typeof pageFunction !== "function") {
     fail("INVALID_PAGE_EXPRESSION", "pageExpression() requires an arrow or function expression");
@@ -50,6 +79,19 @@ export function pageExpression(pageFunction, input) {
   }
   if (encodedInput === undefined) encodedInput = "null";
   return `(${Function.prototype.toString.call(pageFunction)})(${encodedInput})`;
+}
+
+export function recordHasMeaningfulField(record, field) {
+  if (!record || typeof record !== "object" || Array.isArray(record)
+    || !Object.hasOwn(record, field)) return false;
+  const value = record[field];
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return false;
 }
 
 export function recordGroupOrderRequirement(records, expectedPageKeys, key = "pageKey") {
@@ -76,12 +118,16 @@ export function recordGroupOrderRequirement(records, expectedPageKeys, key = "pa
 
 function acceptanceInput(value, pages, maxRecordsPerPage) {
   if (value === undefined) {
-    return { recordCount: null, recordsByPage: [], pageIds: [], requiredFields: [] };
+    return {
+      recordCount: null, recordsByPage: [], pageIds: [], requiredFields: [], taskFacts: [],
+    };
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail("INVALID_TASK_ARGS", "args.acceptance must be an object");
   }
-  const allowed = new Set(["recordCount", "recordsByPage", "pageIds", "requiredFields"]);
+  const allowed = new Set([
+    "recordCount", "recordsByPage", "pageIds", "requiredFields", "taskFacts",
+  ]);
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     fail("INVALID_TASK_ARGS", `args.acceptance has unknown keys: ${unknown.join(", ")}`);
@@ -149,7 +195,29 @@ function acceptanceInput(value, pages, maxRecordsPerPage) {
       fail("INVALID_TASK_ARGS", "args.acceptance.requiredFields must be unique");
     }
   }
-  return { recordCount, recordsByPage, pageIds, requiredFields };
+  const taskFacts = [];
+  if (Object.hasOwn(value, "taskFacts")) {
+    if (!Array.isArray(value.taskFacts) || value.taskFacts.length < 1
+      || value.taskFacts.length > 64) {
+      fail("INVALID_TASK_ARGS", "args.acceptance.taskFacts must contain 1-64 facts");
+    }
+    const ids = new Set();
+    for (const [index, entry] of value.taskFacts.entries()) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)
+        || Object.keys(entry).some((key) => !["id", "expected"].includes(key))
+        || !Object.hasOwn(entry, "expected")
+        || typeof entry.id !== "string" || !/^[A-Za-z0-9._:-]{1,100}$/u.test(entry.id)
+        || ids.has(entry.id)) {
+        fail("INVALID_TASK_ARGS", `args.acceptance.taskFacts[${index}] is invalid`);
+      }
+      ids.add(entry.id);
+      taskFacts.push({
+        id: entry.id,
+        expected: boundedFactValue(entry.expected, `args.acceptance.taskFacts[${index}].expected`),
+      });
+    }
+  }
+  return { recordCount, recordsByPage, pageIds, requiredFields, taskFacts };
 }
 
 function acceptanceRequirements(plan, records, completedPageIds) {
@@ -193,7 +261,7 @@ function acceptanceRequirements(plan, records, completedPageIds) {
     });
   }
   for (const field of plan.acceptance.requiredFields) {
-    const actual = records.filter((record) => Object.hasOwn(record, field)).length;
+    const actual = records.filter((record) => recordHasMeaningfulField(record, field)).length;
     requirements.push({
       id: stableRequirementId("required-field", field),
       satisfied: actual === records.length,
@@ -204,17 +272,30 @@ function acceptanceRequirements(plan, records, completedPageIds) {
   return requirements;
 }
 
-function inputs(args) {
+export function taskInputs(args) {
   if (!Array.isArray(args.pages) || args.pages.length < 1 || args.pages.length > 50) {
-    fail("INVALID_TASK_ARGS", "args.pages must contain 1-50 {id,url} entries");
+    fail("INVALID_TASK_ARGS", "args.pages must contain 1-50 {pageKey,url} entries");
   }
   const seen = new Set();
   const pages = args.pages.map((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       fail("INVALID_TASK_ARGS", `args.pages[${index}] must be an object`);
     }
-    const id = String(entry.id ?? "").trim();
-    if (!id || seen.has(id)) fail("INVALID_TASK_ARGS", `args.pages[${index}].id must be unique`);
+    const unknown = Object.keys(entry)
+      .filter((key) => !["id", "pageKey", "url", "taskData"].includes(key));
+    if (unknown.length > 0) {
+      fail(
+        "INVALID_TASK_ARGS",
+        `args.pages[${index}] has unknown keys; put custom values under taskData`,
+      );
+    }
+    if (Object.hasOwn(entry, "id") && Object.hasOwn(entry, "pageKey")) {
+      fail("INVALID_TASK_ARGS", `args.pages[${index}] must use pageKey or legacy id, not both`);
+    }
+    const id = String(entry.pageKey ?? entry.id ?? "").trim();
+    if (!id || seen.has(id)) {
+      fail("INVALID_TASK_ARGS", `args.pages[${index}].pageKey must be non-empty and unique`);
+    }
     seen.add(id);
     let url;
     try {
@@ -225,7 +306,22 @@ function inputs(args) {
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
       fail("INVALID_TASK_ARGS", `args.pages[${index}].url must be credential-free HTTP(S)`);
     }
-    return { id, url: url.href };
+    let taskData = {};
+    if (Object.hasOwn(entry, "taskData")) {
+      if (!entry.taskData || typeof entry.taskData !== "object" || Array.isArray(entry.taskData)) {
+        fail("INVALID_TASK_ARGS", `args.pages[${index}].taskData must be an object`);
+      }
+      taskData = boundedFactValue(entry.taskData, `args.pages[${index}].taskData`);
+      if (Object.hasOwn(taskData, "scrollDeltaY")
+        && (!Number.isInteger(taskData.scrollDeltaY) || taskData.scrollDeltaY === 0
+          || taskData.scrollDeltaY < -100_000 || taskData.scrollDeltaY > 100_000)) {
+        fail(
+          "INVALID_TASK_ARGS",
+          `args.pages[${index}].taskData.scrollDeltaY must be a non-zero integer from -100000 to 100000`,
+        );
+      }
+    }
+    return { id, url: url.href, taskData };
   });
   const outputPath = String(args.outputPath ?? "");
   const manifestPath = String(args.manifestPath ?? "");
@@ -251,6 +347,22 @@ function inputs(args) {
     ? args.maxRecordsPerPage
     : 100;
   const acceptance = acceptanceInput(args.acceptance, pages, maxRecordsPerPage);
+  const nativeTaskFacts = pages
+    .map((page, index) => nativeScrollFact(page, index))
+    .filter(Boolean);
+  if (acceptance.taskFacts.length + nativeTaskFacts.length > 64) {
+    fail("INVALID_TASK_ARGS", "custom and native task facts together must not exceed 64");
+  }
+  const declaredFactIds = new Set(acceptance.taskFacts.map((entry) => entry.id));
+  for (const fact of nativeTaskFacts) {
+    if (declaredFactIds.has(fact.id)) {
+      fail(
+        "INVALID_TASK_ARGS",
+        `args.acceptance.taskFacts must not redeclare native fact '${fact.id}'`,
+      );
+    }
+    acceptance.taskFacts.push(fact);
+  }
   return {
     pages,
     outputPath,
@@ -262,7 +374,9 @@ function inputs(args) {
   };
 }
 
-async function collectPage({ moneyhand, task, signal, page, maxTextChars, maxRecordsPerPage }) {
+async function collectPage({
+  moneyhand, task, signal, page, pageIndex, maxTextChars, maxRecordsPerPage,
+}) {
   await moneyhand.navigateTaskTab({
     taskSpaceId: task.taskSpaceId,
     tabId: task.tabId,
@@ -272,24 +386,49 @@ async function collectPage({ moneyhand, task, signal, page, maxTextChars, maxRec
     timeoutMs: 30_000,
     signal,
   });
+  const taskFacts = [];
+  const expectedScroll = nativeScrollFact(page, pageIndex);
+  if (expectedScroll) {
+    const receipt = await moneyhand.scrollTaskTab({
+      taskSpaceId: task.taskSpaceId,
+      tabId: task.tabId,
+      deltaY: page.taskData.scrollDeltaY,
+      effectId: stableEffectId("scroll", `${page.id}\n${page.url}\n${page.taskData.scrollDeltaY}`),
+      signal,
+    });
+    if (!receipt || receipt.effect !== "input" || receipt.actionDispatched !== true
+      || receipt.delta?.y !== page.taskData.scrollDeltaY
+      || typeof receipt.handRequestId !== "string" || receipt.handRequestId.length < 1) {
+      fail("SCROLL_RECEIPT_INVALID", `Page '${page.id}' did not return an exact scroll receipt`);
+    }
+    taskFacts.push({
+      id: expectedScroll.id,
+      actual: {
+        pageKey: page.id,
+        deltaY: receipt.delta.y,
+        effect: receipt.effect,
+        actionDispatched: receipt.actionDispatched,
+        handRequestId: receipt.handRequestId,
+      },
+    });
+  }
   const evaluated = await moneyhand.evaluateTaskTab({
     taskSpaceId: task.taskSpaceId,
     tabId: task.tabId,
-    // Replace only these generic record selectors/fields for the concrete site. Collect every
-    // bounded matching record; never invent a per-page cardinality the user did not request.
+    // Replace only the generic selector for a concrete site. The standard fields below already use
+    // browser-proven sources; never guess another selector merely to rename them.
     expression: pageExpression(({ id, maxTextChars, maxRecordsPerPage }) => {
       const pageId = document.querySelector("[data-page-id]")?.getAttribute("data-page-id") ?? id;
       const elements = [...document.querySelectorAll("[data-record], .record-card")]
         .slice(0, maxRecordsPerPage);
       return elements.map((element, index) => ({
-        id: `${id}:${index}`,
+        recordId: `${id}:${index}`,
         pageKey: id,
         pageId,
-        url: location.href,
-        pageTitle: document.title,
+        sourceUrl: location.href,
+        title: document.title,
         index,
-        text: (element.innerText ?? "").slice(0, maxTextChars),
-        literalTemplateTextIsSafe: "literal-${POST_ID}",
+        body: (element.innerText ?? "").slice(0, maxTextChars),
       }));
     }, { id: page.id, maxTextChars, maxRecordsPerPage }),
     timeoutMs: 15_000,
@@ -298,17 +437,16 @@ async function collectPage({ moneyhand, task, signal, page, maxTextChars, maxRec
   const records = evaluated.value;
   if (!Array.isArray(records) || records.length < 1 || records.length > maxRecordsPerPage
     || records.some((record) => !record || typeof record !== "object" || Array.isArray(record)
-      || record.pageKey !== page.id || typeof record.id !== "string"
-      || typeof record.url !== "string" || typeof record.pageId !== "string"
-      || typeof record.pageTitle !== "string" || !Number.isInteger(record.index)
-      || typeof record.text !== "string")) {
+      || record.pageKey !== page.id || typeof record.recordId !== "string"
+      || typeof record.sourceUrl !== "string" || typeof record.pageId !== "string"
+      || typeof record.title !== "string" || !Number.isInteger(record.index)
+      || typeof record.body !== "string")) {
     fail("PAGE_RECORD_INVALID", `Page '${page.id}' did not return bounded record rows`);
   }
-  return records;
+  return { records, taskFacts };
 }
 
-async function executeTask({ moneyhand, task, signal, args, progress }) {
-  const plan = inputs(args);
+async function executeTask({ moneyhand, task, signal, plan, progress }) {
   await Promise.all([
     mkdir(dirname(plan.outputPath), { recursive: true }),
     mkdir(dirname(plan.manifestPath), { recursive: true }),
@@ -325,17 +463,21 @@ async function executeTask({ moneyhand, task, signal, args, progress }) {
     throw error;
   }
   const records = [];
+  const observedTaskFacts = [];
   const completedPageIds = [];
   for (let index = 0; index < plan.pages.length; index += 1) {
     const page = plan.pages[index];
-    records.push(...await collectPage({
+    const collected = await collectPage({
       moneyhand,
       task,
       signal,
       page,
+      pageIndex: index,
       maxTextChars: plan.maxTextChars,
       maxRecordsPerPage: plan.maxRecordsPerPage,
-    }));
+    });
+    records.push(...collected.records);
+    observedTaskFacts.push(...collected.taskFacts);
     completedPageIds.push(page.id);
     await writeFile(plan.checkpointPath, `${JSON.stringify({
       schema: "npc-moneyhand-example-checkpoint/1",
@@ -368,6 +510,7 @@ async function executeTask({ moneyhand, task, signal, args, progress }) {
   return {
     outcome: {
       status: "complete",
+      taskFacts: observedTaskFacts,
       requirements: acceptanceRequirements(plan, records, completedPageIds),
       evidence: [
         { type: "output-file", path: plan.outputPath, format: "jsonl", count: records.length },
@@ -419,6 +562,8 @@ function taskResult(value) {
 }
 
 export async function run({ moneyhand, signal, args = {}, progress, taskExecutionId }) {
+  // Validate every JSON argument before opening a task window or dispatching browser work.
+  const plan = taskInputs(args);
   const task = await moneyhand.beginTaskContext({
     ...(args.taskId ? { id: args.taskId } : {}),
     behavior: args.behavior === "human" ? "human" : "raw",
@@ -436,7 +581,7 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
       moneyhand,
       task,
       signal,
-      args,
+      plan,
       progress,
     })));
   } catch (error) {
@@ -465,7 +610,13 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
   }
   return {
     taskExecutionId,
-    args,
+    args: plan.acceptance.taskFacts.length === 0 ? args : {
+      ...args,
+      acceptance: {
+        ...(args.acceptance ?? {}),
+        taskFacts: plan.acceptance.taskFacts,
+      },
+    },
     task: { page: task.page, behavior: task.behavior },
     outcome,
     output,

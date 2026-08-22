@@ -135,7 +135,24 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(runtime, /`acceptance` is an allowlist of explicit facts/u);
   assert.match(runtime, /Never infer `pageIds` from a page key, URL, title, or this example/u);
   assert.match(runtime, /Otherwise omit `pageIds`/u);
+  assert.match(runtime, /`requiredFields` means every record owns a meaningful value/u);
+  assert.match(runtime, /a merely present empty field fails/u);
+  assert.match(runtime, /`title:document\.title`/u);
+  assert.match(runtime, /directly emits `recordId`[\s\S]*`sourceUrl:location\.href`/u);
+  assert.match(runtime, /Never guess a new selector merely to rename a field/u);
+  assert.match(runtime, /return incomplete instead of manufacturing an empty or misleading value/u);
   assert.doesNotMatch(runtime, /"pageIds":\{"alpha":"page-alpha"\}/u);
+  assert.match(runtime, /`taskData\.scrollDeltaY` is a built-in/u);
+  assert.match(runtime, /Use `pageKey` for each page/u);
+  assert.match(runtime, /`id` remains a legacy alias; supplying both fails/u);
+  assert.match(runtime, /validates all JSON before opening a task window/u);
+  assert.match(runtime, /automatically proves `scroll:page-N`/u);
+  assert.match(runtime, /args\.acceptance\.taskFacts[\s\S]*outcome\.taskFacts/u);
+  assert.match(runtime, /IDs match exactly/u);
+  assert.match(runtime, /expected objects are recursive subsets of actual objects/u);
+  assert.match(runtime, /Arrays and primitives remain exact/u);
+  assert.match(runtime, /runtime:behavior-mode/u);
+  assert.match(await readFile(SKILL_PATH, "utf8"), /evidence file alone never proves a requirement/u);
 });
 
 test("normal task docs expose timeout cleanup and non-ambiguous screenshot terminals", async () => {

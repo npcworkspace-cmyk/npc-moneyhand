@@ -1,7 +1,13 @@
+import { Buffer } from "node:buffer";
+import { isDeepStrictEqual } from "node:util";
+
 export const TASK_EVIDENCE_SCHEMA = "npc-moneyhand-task-evidence/1";
 export const TASK_COMPLETION_GATE_SCHEMA = "npc-moneyhand-task-completion-gate/1";
 
 const MAX_ENTRIES = 2_048;
+const MAX_TASK_FACTS = 64;
+const MAX_TASK_FACT_BYTES = 4_096;
+const TASK_FACT_ID = /^[A-Za-z0-9._:-]{1,100}$/u;
 const COMPLETE_STATES = new Set(["complete", "completed", "success", "succeeded"]);
 const UNRESOLVED_EFFECT_STATES = new Set(["pending", "outcome_unknown"]);
 
@@ -18,7 +24,7 @@ function taskStatus(value) {
   return typeof status === "string" ? status : null;
 }
 
-function declaredRequirements(value) {
+function outcomeRequirements(value) {
   const requirements = terminalValue(value)?.requirements;
   if (!Array.isArray(requirements) || requirements.length < 1 || requirements.length > 256) {
     return { valid: false, entries: [] };
@@ -39,6 +45,138 @@ function declaredRequirements(value) {
     });
   }
   return { valid: true, entries };
+}
+
+function boundedJsonFact(value) {
+  let encoded;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    return { valid: false, value: null };
+  }
+  if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > MAX_TASK_FACT_BYTES) {
+    return { valid: false, value: null };
+  }
+  const normalized = JSON.parse(encoded);
+  return { valid: isDeepStrictEqual(value, normalized), value: normalized };
+}
+
+function taskFactEvidence(value) {
+  if (value === undefined) return { valid: true, count: 0 };
+  const entries = Array.isArray(value) ? value : [value];
+  if (entries.length < 1 || entries.length > 32) return { valid: false, count: 0 };
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)
+      || !boundedJsonFact(entry).valid) {
+      return { valid: false, count: 0 };
+    }
+  }
+  return { valid: true, count: entries.length };
+}
+
+function taskFactEntries(value, field) {
+  if (value === undefined) return { valid: true, entries: [] };
+  if (!Array.isArray(value) || value.length > MAX_TASK_FACTS) {
+    return { valid: false, entries: [] };
+  }
+  const expectedField = field === "expected";
+  const allowed = new Set(expectedField ? ["id", "expected"] : ["id", "actual", "evidence"]);
+  const entries = [];
+  const ids = new Set();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)
+      || !TASK_FACT_ID.test(entry.id ?? "") || ids.has(entry.id)
+      || !Object.hasOwn(entry, field)
+      || Object.keys(entry).some((key) => !allowed.has(key))) {
+      return { valid: false, entries: [] };
+    }
+    const fact = boundedJsonFact(entry[field]);
+    const evidence = expectedField
+      ? { valid: entry.evidence === undefined, count: 0 }
+      : taskFactEvidence(entry.evidence);
+    if (!fact.valid || !evidence.valid) {
+      return { valid: false, entries: [] };
+    }
+    ids.add(entry.id);
+    entries.push({
+      id: entry.id,
+      value: fact.value,
+      evidenceCount: evidence.count,
+    });
+  }
+  return { valid: true, entries };
+}
+
+function taskFactMatches(expected, actual) {
+  if (isDeepStrictEqual(expected, actual)) return true;
+  if (!expected || typeof expected !== "object" || Array.isArray(expected)
+    || !actual || typeof actual !== "object" || Array.isArray(actual)) {
+    return false;
+  }
+  return Object.entries(expected).every(([key, expectedValue]) => (
+    Object.hasOwn(actual, key) && taskFactMatches(expectedValue, actual[key])
+  ));
+}
+
+function taskFactRequirements(value) {
+  const expected = taskFactEntries(value?.args?.acceptance?.taskFacts, "expected");
+  const observed = taskFactEntries(terminalValue(value)?.taskFacts, "actual");
+  const expectedIds = new Set(expected.entries.map((entry) => entry.id));
+  const observedById = new Map(observed.entries.map((entry) => [entry.id, entry]));
+  const exactIds = observed.entries.every((entry) => expectedIds.has(entry.id))
+    && observed.entries.length === expected.entries.length;
+  const entries = expected.entries.map((entry) => {
+    const actual = observedById.get(entry.id);
+    return {
+      id: `task-fact:${entry.id}`,
+      satisfied: actual !== undefined && taskFactMatches(entry.value, actual.value),
+      expected: entry.value,
+      ...(actual === undefined ? {} : { actual: actual.value }),
+      evidenceCount: actual?.evidenceCount ?? 0,
+    };
+  });
+  const matched = entries.filter((entry) => entry.satisfied).length;
+  const valid = expected.valid && observed.valid && exactIds;
+  return {
+    valid,
+    entries,
+    expectedCount: expected.entries.length,
+    matched,
+    detail: !expected.valid || !observed.valid
+      ? "task fact declarations or observations violate the bounded contract"
+      : expected.entries.length === 0 && observed.entries.length === 0
+        ? "not applicable because no task-specific facts were declared"
+        : valid && matched === entries.length
+        ? `${matched}/${entries.length} task facts observed and matched`
+        : `${matched}/${expected.entries.length} task facts matched; declarations or observations are missing, extra, invalid, or unequal`,
+  };
+}
+
+function runtimeBehaviorRequirements(value) {
+  if (value?.args?.behavior !== "human") return { valid: true, entries: [] };
+  const actual = value?.task?.behavior?.mode;
+  return {
+    valid: typeof actual === "string",
+    entries: [{
+      id: "runtime:behavior-mode",
+      satisfied: actual === "human",
+      expected: "human",
+      ...(actual === undefined ? {} : { actual }),
+      evidenceCount: 0,
+    }],
+  };
+}
+
+function declaredRequirements(value, taskFacts) {
+  const declared = outcomeRequirements(value);
+  const behavior = runtimeBehaviorRequirements(value);
+  const entries = [...declared.entries, ...behavior.entries, ...taskFacts.entries];
+  const ids = new Set(entries.map((entry) => entry.id));
+  return {
+    valid: declared.valid && behavior.valid && taskFacts.valid
+      && entries.length <= 256 && ids.size === entries.length,
+    entries,
+  };
 }
 
 function bulkOutputEvidence(value, evidence) {
@@ -166,7 +304,8 @@ export class TaskEvidenceCollector {
 export function evaluateTaskCompletion({ value, cleanup, evidence } = {}) {
   const status = taskStatus(value);
   const claimedComplete = COMPLETE_STATES.has(status);
-  const requirements = declaredRequirements(value);
+  const taskFacts = taskFactRequirements(value);
+  const requirements = declaredRequirements(value, taskFacts);
   const outputEvidence = bulkOutputEvidence(value, evidence);
   const latestRateByScope = new Map();
   const latestEffectById = new Map();
@@ -199,6 +338,14 @@ export function evaluateTaskCompletion({ value, cleanup, evidence } = {}) {
       id: "instruction-blockers-resolved",
       passed: terminalValue(value)?.status !== "needs_instruction",
       detail: "no unresolved instruction wait",
+    },
+    {
+      id: "task-facts-verified",
+      passed: !claimedComplete || (taskFacts.valid
+        && taskFacts.matched === taskFacts.expectedCount),
+      detail: !claimedComplete
+        ? "not applicable because the task did not claim complete"
+        : taskFacts.detail,
     },
     {
       id: "declared-requirements",

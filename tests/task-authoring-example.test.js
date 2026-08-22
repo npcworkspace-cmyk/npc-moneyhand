@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import {
+  TaskEvidenceCollector,
+  evaluateTaskCompletion,
+} from "../skills/npc-moneyhand/scripts/lib/task-evidence.mjs";
 
 const examplePath = resolve(
   "skills",
@@ -12,6 +16,134 @@ const examplePath = resolve(
   "bounded-file-task.example.mjs",
 );
 
+test("complete authoring example treats required fields as meaningful business values", async () => {
+  const { recordHasMeaningfulField } = await import(pathToFileURL(examplePath));
+  for (const value of ["value", 0, false, [0], { count: 0 }]) {
+    assert.equal(recordHasMeaningfulField({ field: value }, "field"), true);
+  }
+  for (const value of ["", "  \n", null, undefined, Number.NaN, [], {}]) {
+    assert.equal(recordHasMeaningfulField({ field: value }, "field"), false);
+  }
+  assert.equal(recordHasMeaningfulField({}, "field"), false);
+});
+
+test("complete authoring example preserves bounded page taskData and rejects silent fields", async () => {
+  const module = await import(pathToFileURL(examplePath));
+  const base = {
+    outputPath: resolve("task-data-output.jsonl"),
+    manifestPath: resolve("task-data-manifest.json"),
+    checkpointPath: resolve("task-data-checkpoint.json"),
+  };
+  const plan = module.taskInputs({
+    ...base,
+    pages: [{
+      pageKey: "alpha",
+      url: "https://example.test/alpha",
+      taskData: { scrollDeltaY: 230, label: "拟人滚动" },
+    }],
+  });
+  assert.deepEqual(plan.pages, [{
+    id: "alpha",
+    url: "https://example.test/alpha",
+    taskData: { scrollDeltaY: 230, label: "拟人滚动" },
+  }]);
+  assert.throws(() => module.taskInputs({
+    ...base,
+    pages: [{
+      id: "alpha",
+      pageKey: "alpha",
+      url: "https://example.test/alpha",
+    }],
+  }), (error) => error?.code === "INVALID_TASK_ARGS"
+    && /not both/u.test(error.message));
+  assert.deepEqual(plan.acceptance.taskFacts, [{
+    id: "scroll:page-1",
+    expected: {
+      pageKey: "alpha",
+      deltaY: 230,
+      effect: "input",
+      actionDispatched: true,
+    },
+  }]);
+  assert.throws(() => module.taskInputs({
+    ...base,
+    pages: [{ id: "alpha", url: "https://example.test/alpha", deltaY: 230 }],
+  }), (error) => error?.code === "INVALID_TASK_ARGS"
+    && /put custom values under taskData/u.test(error.message));
+  assert.throws(() => module.taskInputs({
+    ...base,
+    pages: [{
+      id: "alpha",
+      url: "https://example.test/alpha",
+      taskData: { text: "界".repeat(1_400) },
+    }],
+  }), (error) => error?.code === "INVALID_TASK_ARGS");
+  for (const scrollDeltaY of [0, 0.5, -100_001, 100_001, "230"]) {
+    assert.throws(() => module.taskInputs({
+      ...base,
+      pages: [{
+        id: "alpha",
+        url: "https://example.test/alpha",
+        taskData: { scrollDeltaY },
+      }],
+    }), (error) => error?.code === "INVALID_TASK_ARGS"
+      && /scrollDeltaY/u.test(error.message));
+  }
+  assert.throws(() => module.taskInputs({
+    ...base,
+    pages: [{
+      id: "alpha",
+      url: "https://example.test/alpha",
+      taskData: { scrollDeltaY: 230 },
+    }],
+    acceptance: {
+      taskFacts: [{ id: "scroll:page-1", expected: { deltaY: 999 } }],
+    },
+  }), (error) => error?.code === "INVALID_TASK_ARGS"
+    && /must not redeclare native fact/u.test(error.message));
+  assert.throws(() => module.taskInputs({
+    ...base,
+    pages: [{
+      id: "alpha",
+      url: "https://example.test/alpha",
+      taskData: { scrollDeltaY: 230 },
+    }],
+    acceptance: {
+      taskFacts: Array.from({ length: 64 }, (_, index) => ({
+        id: `custom:${index}`,
+        expected: true,
+      })),
+    },
+  }), (error) => error?.code === "INVALID_TASK_ARGS"
+    && /must not exceed 64/u.test(error.message));
+});
+
+test("complete authoring example rejects invalid native input before opening a task window", async () => {
+  const module = await import(pathToFileURL(examplePath));
+  let began = false;
+  await assert.rejects(module.run({
+    moneyhand: {
+      async beginTaskContext() {
+        began = true;
+        throw new Error("must not be reached");
+      },
+    },
+    signal: AbortSignal.timeout(5_000),
+    args: {
+      pages: [{
+        id: "alpha",
+        url: "https://example.test/alpha",
+        taskData: { scrollDeltaY: 0 },
+      }],
+      outputPath: resolve("invalid-native-output.jsonl"),
+      manifestPath: resolve("invalid-native-manifest.json"),
+      checkpointPath: resolve("invalid-native-checkpoint.json"),
+    },
+    async progress() {},
+  }), (error) => error?.code === "INVALID_TASK_ARGS" && /scrollDeltaY/u.test(error.message));
+  assert.equal(began, false);
+});
+
 test("complete authoring example collects bounded pages, persists bulk data and returns a manifest", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-authoring-example-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -19,9 +151,13 @@ test("complete authoring example collects bounded pages, persists bulk data and 
   const manifestPath = join(directory, "manifest.json");
   const checkpointPath = join(directory, "checkpoint.json");
   const pages = [
-    { id: "first", url: "https://example.test/one" },
-    { id: "literal-${POST_ID}", url: "https://example.test/two?from=agent" },
-    { id: "third", url: "https://example.test/three" },
+    { id: "first", url: "https://example.test/one", taskData: { scrollDeltaY: 180 } },
+    {
+      id: "literal-${POST_ID}",
+      url: "https://example.test/two?from=agent",
+      taskData: { scrollDeltaY: 260 },
+    },
+    { id: "third", url: "https://example.test/three", taskData: { scrollDeltaY: -140 } },
   ];
   const calls = [];
   const expressions = [];
@@ -34,7 +170,7 @@ test("complete authoring example collects bounded pages, persists bulk data and 
         taskSpaceId: "example-task-space",
         tabId: 73,
         page: { tabId: 73, url: "about:blank" },
-        behavior: { mode: "raw" },
+        behavior: { mode: options.behavior },
       };
     },
     async navigateTaskTab(options) {
@@ -42,19 +178,27 @@ test("complete authoring example collects bounded pages, persists bulk data and 
       currentPage = pages.find((page) => page.url === options.url);
       return { actionDispatched: true };
     },
+    async scrollTaskTab(options) {
+      calls.push({ method: "scrollTaskTab", options });
+      return {
+        effect: "input",
+        actionDispatched: true,
+        delta: { x: 0, y: options.deltaY },
+        handRequestId: `hand-${currentPage.id}`,
+      };
+    },
     async evaluateTaskTab(options) {
       calls.push({ method: "evaluateTaskTab", options });
       expressions.push(options.expression);
       return {
         value: Array.from({ length: recordCounts.get(currentPage.id) }, (_, index) => ({
-          id: `${currentPage.id}:${index}`,
+          recordId: `${currentPage.id}:${index}`,
           pageKey: currentPage.id,
           pageId: currentPage.id,
-          url: currentPage.url,
-          pageTitle: `Title ${currentPage.id}`,
+          sourceUrl: currentPage.url,
+          title: `Title ${currentPage.id}`,
           index,
-          text: `Body ${currentPage.id} ${index}`,
-          literalTemplateTextIsSafe: "literal-${POST_ID}",
+          body: `Body ${currentPage.id} ${index}`,
         })),
       };
     },
@@ -76,19 +220,19 @@ test("complete authoring example collects bounded pages, persists bulk data and 
       outputPath,
       manifestPath,
       checkpointPath,
+      behavior: "human",
       acceptance: {
         recordCount: 6,
         recordsByPage: { first: 2, "literal-${POST_ID}": 1, third: 3 },
         pageIds: { "literal-${POST_ID}": "literal-${POST_ID}" },
         requiredFields: [
-          "id",
+          "recordId",
           "pageKey",
           "pageId",
-          "url",
-          "pageTitle",
+          "sourceUrl",
+          "title",
           "index",
-          "text",
-          "literalTemplateTextIsSafe",
+          "body",
         ],
       },
     },
@@ -119,17 +263,11 @@ test("complete authoring example collects bounded pages, persists bulk data and 
       actual: pages.map((page) => page.id).join("\n"),
     },
   ]);
-  assert.equal(result.outcome.requirements.length, 16);
+  assert.equal(result.outcome.requirements.length, 15);
   assert.equal(result.outcome.requirements.every((requirement) => requirement.satisfied), true);
   assert.equal(
     result.outcome.requirements.some((requirement) => (
       requirement.id.startsWith("page-record-count:first:")
-    )),
-    true,
-  );
-  assert.equal(
-    result.outcome.requirements.some((requirement) => (
-      requirement.id.startsWith("required-field:literalTemplateTextIsSafe:")
     )),
     true,
   );
@@ -139,8 +277,38 @@ test("complete authoring example collects bounded pages, persists bulk data and 
     expected: 6,
     actual: 6,
   });
-  assert.equal(new Set(result.outcome.requirements.map((requirement) => requirement.id)).size, 16);
+  assert.equal(new Set(result.outcome.requirements.map((requirement) => requirement.id)).size, 15);
   assert.equal(result.outcome.evidence.length, 2);
+  assert.deepEqual(result.outcome.taskFacts, pages.map((page, index) => ({
+    id: `scroll:page-${index + 1}`,
+    actual: {
+      pageKey: page.id,
+      deltaY: page.taskData.scrollDeltaY,
+      effect: "input",
+      actionDispatched: true,
+      handRequestId: `hand-${page.id}`,
+    },
+  })));
+  assert.deepEqual(result.args.acceptance.taskFacts, pages.map((page, index) => ({
+    id: `scroll:page-${index + 1}`,
+    expected: {
+      pageKey: page.id,
+      deltaY: page.taskData.scrollDeltaY,
+      effect: "input",
+      actionDispatched: true,
+    },
+  })));
+  const collector = new TaskEvidenceCollector({
+    taskExecutionId: "task-example",
+    startedAtMs: 0,
+  });
+  const evidence = collector.build({ value: result, cleanup: { ok: true } });
+  const gate = evaluateTaskCompletion({ value: result, cleanup: { ok: true }, evidence });
+  assert.equal(gate.passed, true);
+  assert.deepEqual(
+    gate.checks.find((entry) => entry.id === "task-facts-verified"),
+    { id: "task-facts-verified", passed: true, detail: "3/3 task facts observed and matched" },
+  );
   assert.equal(progress.length, 4);
   assert.deepEqual(progress.slice(1).map((entry) => entry.current), [1, 2, 3]);
   const navigations = calls.filter((call) => call.method === "navigateTaskTab");
@@ -151,6 +319,13 @@ test("complete authoring example collects bounded pages, persists bulk data and 
     assert.equal(call.options.waitUntil, "domcontentloaded");
     assert.equal(call.options.timeoutMs, 30_000);
   }
+  const scrolls = calls.filter((call) => call.method === "scrollTaskTab");
+  assert.equal(scrolls.length, 3);
+  assert.deepEqual(scrolls.map((call) => call.options.deltaY), [180, 260, -140]);
+  assert.equal(new Set(scrolls.map((call) => call.options.effectId)).size, 3);
+  assert.equal(scrolls.every((call) => (
+    /^[A-Za-z0-9._:-]{1,128}$/u.test(call.options.effectId)
+  )), true);
   assert.equal(expressions.length, 3);
   assert.equal(expressions[1].includes('"literal-${POST_ID}"'), true);
   const records = (await readFile(outputPath, "utf8"))
@@ -190,13 +365,13 @@ test("complete authoring example refuses to overwrite an existing bulk output", 
       async navigateTaskTab() {},
       async evaluateTaskTab() {
         return { value: [{
-          id: "one:0",
+          recordId: "one:0",
           pageKey: "one",
           pageId: "one",
-          url: "https://example.test/",
-          pageTitle: "One",
+          sourceUrl: "https://example.test/",
+          title: "One",
           index: 0,
-          text: "One",
+          body: "One",
         }] };
       },
       async inspectTaskBlocker() {

@@ -1,6 +1,6 @@
 # npc-moneyhand 架构
 
-当前产品边界只有一个 Agent Skill 和一个 Chrome Extension。版本为 `1.2.2`。
+当前产品边界只有一个 Agent Skill 和一个 Chrome Extension。版本为 `1.2.3`。
 
 ## 总体结构
 

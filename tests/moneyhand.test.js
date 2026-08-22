@@ -119,33 +119,20 @@ test("runMoneyHandTask rejects unchanged packaged authoring files before browser
 
 test("runMoneyHandTask allows the unchanged runnable bounded-file reference", async () => {
   let taskContexts = 0;
-  const value = await runMoneyHandTask({
+  await assert.rejects(runMoneyHandTask({
     moneyhand: {
       async request() {},
       async beginTaskContext() {
         taskContexts += 1;
-        return {
-          taskSpaceId: "runnable-reference-space",
-          tabId: 71,
-          page: { tabId: 71, url: "about:blank" },
-          behavior: { mode: "raw" },
-        };
-      },
-      async inspectTaskBlocker() {
-        return { captured: false, screenshot: { captured: false }, actionReplayed: false };
-      },
-      async completeTaskContext() {
-        return { cleanupComplete: true, behaviorReset: { ok: true } };
+        throw new Error("invalid task args must fail before opening a task context");
       },
       ownedTaskWindowIds() { return []; },
       async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
     },
     taskPath: resolve("skills/npc-moneyhand/references/bounded-file-task.example.mjs"),
     args: {},
-  });
-  assert.equal(taskContexts, 1);
-  assert.equal(value.outcome.status, "incomplete");
-  assert.equal(value.outcome.error.code, "INVALID_TASK_ARGS");
+  }), (error) => error?.code === "INVALID_TASK_ARGS");
+  assert.equal(taskContexts, 0);
 });
 
 test("runMoneyHandTask accepts an implemented legacy copy without manual sentinel removal", async (t) => {

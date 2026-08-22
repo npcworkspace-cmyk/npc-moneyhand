@@ -18,8 +18,8 @@ const packageJson = readJson("package.json");
 const manifest = readJson("extension/manifest.json");
 
 if (packageJson.name !== "npc-moneyhand") fail("package name must be npc-moneyhand");
-if (packageJson.version !== "1.2.2") {
-  fail("package version must be 1.2.2");
+if (packageJson.version !== "1.2.3") {
+  fail("package version must be 1.2.3");
 }
 if (packageJson.dependencies || packageJson.devDependencies || packageJson.optionalDependencies) {
   fail("npc-moneyhand must not declare external dependencies");
@@ -29,7 +29,7 @@ if (existsSync(join(root, "package-lock.json"))) {
 }
 
 if (manifest.name !== "npc-moneyhand") fail("extension name must be npc-moneyhand");
-if (manifest.version !== "1.2.2") fail("extension version must be 1.2.2");
+if (manifest.version !== "1.2.3") fail("extension version must be 1.2.3");
 if (manifest.version_name !== packageJson.version) {
   fail("manifest version_name must match package version");
 }
@@ -200,10 +200,25 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.authoring?.manualSentinelRemovalRequired !== false
   || contract.taskRuntime?.authoring?.runnableCompleteExampleAllowed !== true
   || JSON.stringify(contract.taskRuntime?.authoring?.completeExampleAcceptanceArgs)
-    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields"])
+    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields", "taskFacts"])
   || contract.taskRuntime?.authoring?.acceptanceAssertionSource
     !== "explicit-user-or-authoritative-task-input-only"
   || contract.taskRuntime?.authoring?.unknownAcceptanceValues !== "omit-never-guess"
+  || contract.taskRuntime?.authoring?.requiredFieldSemantics
+    !== "present-and-meaningful-on-every-record"
+  || contract.taskRuntime?.authoring?.taskFactsContract
+    !== "expected-deep-subset-of-actual-with-exact-id-set"
+  || contract.taskRuntime?.authoring?.humanBehaviorRequirement !== "runtime:behavior-mode"
+  || JSON.stringify(contract.taskRuntime?.authoring?.completeExampleNativePageTaskData)
+    !== JSON.stringify(["scrollDeltaY"])
+  || JSON.stringify(contract.taskRuntime?.authoring?.completeExamplePageKeyAliases)
+    !== JSON.stringify(["pageKey", "id"])
+  || contract.taskRuntime?.authoring?.completeExampleAmbiguousPageKeysAllowed !== false
+  || contract.taskRuntime?.authoring?.completeExampleNativeFactMode
+    !== "derive-expected-and-observed-from-authoritative-task-data"
+  || contract.taskRuntime?.authoring?.completeExampleInputValidation !== "before-task-context"
+  || JSON.stringify(contract.taskRuntime?.authoring?.completeExampleStandardOutputFields)
+    !== JSON.stringify(["recordId", "pageKey", "pageId", "title", "body", "sourceUrl", "index"])
   || contract.taskRuntime?.authoring?.taskArgsInput
     !== "absolute-utf8-json-file-via---args-file"
   || contract.taskRuntime?.authoring?.executeTaskReturn !== "{outcome,output?}"
@@ -283,10 +298,26 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.transports?.taskModule?.authoring?.manualSentinelRemovalRequired !== false
   || contract.transports?.taskModule?.authoring?.runnableCompleteExampleAllowed !== true
   || JSON.stringify(contract.transports?.taskModule?.authoring?.completeExampleAcceptanceArgs)
-    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields"])
+    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields", "taskFacts"])
   || contract.transports?.taskModule?.authoring?.acceptanceAssertionSource
     !== "explicit-user-or-authoritative-task-input-only"
   || contract.transports?.taskModule?.authoring?.unknownAcceptanceValues !== "omit-never-guess"
+  || contract.transports?.taskModule?.authoring?.requiredFieldSemantics
+    !== "present-and-meaningful-on-every-record"
+  || contract.transports?.taskModule?.authoring?.taskFactsContract
+    !== "expected-deep-subset-of-actual-with-exact-id-set"
+  || contract.transports?.taskModule?.authoring?.humanBehaviorRequirement !== "runtime:behavior-mode"
+  || JSON.stringify(contract.transports?.taskModule?.authoring?.completeExampleNativePageTaskData)
+    !== JSON.stringify(["scrollDeltaY"])
+  || JSON.stringify(contract.transports?.taskModule?.authoring?.completeExamplePageKeyAliases)
+    !== JSON.stringify(["pageKey", "id"])
+  || contract.transports?.taskModule?.authoring?.completeExampleAmbiguousPageKeysAllowed !== false
+  || contract.transports?.taskModule?.authoring?.completeExampleNativeFactMode
+    !== "derive-expected-and-observed-from-authoritative-task-data"
+  || contract.transports?.taskModule?.authoring?.completeExampleInputValidation
+    !== "before-task-context"
+  || JSON.stringify(contract.transports?.taskModule?.authoring?.completeExampleStandardOutputFields)
+    !== JSON.stringify(["recordId", "pageKey", "pageId", "title", "body", "sourceUrl", "index"])
   || contract.transports?.taskModule?.authoring?.taskArgsInput
     !== "absolute-utf8-json-file-via---args-file"
   || contract.transports?.taskModule?.authoring?.pageExpressionHelper

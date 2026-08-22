@@ -470,7 +470,8 @@ export class TaskExecutionLedger {
 
   async writeEvidence(value) {
     let serialized = JSON.stringify(value);
-    let bytes = Buffer.byteLength(serialized, "utf8");
+    let output = `${serialized}\n`;
+    let bytes = Buffer.byteLength(output, "utf8");
     if (bytes > MAX_EVIDENCE_BYTES) {
       serialized = JSON.stringify({
         schema: value?.schema ?? "npc-moneyhand-task-evidence/1",
@@ -485,9 +486,10 @@ export class TaskExecutionLedger {
         timing: value?.timing ?? null,
         cleanup: value?.cleanup ?? null,
       });
-      bytes = Buffer.byteLength(serialized, "utf8");
+      output = `${serialized}\n`;
+      bytes = Buffer.byteLength(output, "utf8");
     }
-    await writeFile(this.paths.evidencePath, `${serialized}\n`, {
+    await writeFile(this.paths.evidencePath, output, {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
@@ -496,7 +498,7 @@ export class TaskExecutionLedger {
     return {
       path: this.paths.evidencePath,
       bytes,
-      sha256: sha256(serialized),
+      sha256: sha256(output),
       private: true,
     };
   }

@@ -1,6 +1,6 @@
 {
   "name": "npc-moneyhand",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Zero-dependency Agent skill and control console for the npc-moneyhand Chrome extension",
   "type": "module",
   "exports": {

@@ -124,7 +124,8 @@ For a first multi-page or file-producing task, copy the runnable platform-neutra
 `references/bounded-file-task.example.mjs`. If its generic record selector fits, leave its source intact
 and put only user-supplied or authoritative task-input expectations in `args.acceptance`; omit every
 unknown value. In particular, never infer a `pageIds` value from a page key, URL, title, or example.
-This complete reference is allowed unchanged. Otherwise adapt only its extractor and acceptance. For every page-side DOM read, use
+This complete reference is allowed unchanged and directly emits `recordId/title/body/sourceUrl`. Name each page with `pageKey` (`id` is a legacy alias; never supply both). Set
+`pages[].taskData.scrollDeltaY` to request a native proven scroll without editing code; its input is validated before a task window opens and its real receipt becomes `scroll:page-N` automatically. Do not redeclare that fact. Put other custom per-page inputs under `pages[].taskData`; unknown sibling keys fail instead of being silently discarded. For every page-side DOM read, use
 `pageExpression(pageFunction,input)`; never hand-build an expression string. For ordered output, use
 `recordGroupOrderRequirement(records,expectedPageKeys)` instead of expanding page IDs from a guessed per-page count.
 MoneyHand selects the latest focused connected Profile once, opens one dedicated task window in
@@ -196,7 +197,12 @@ never the bulk-data payload. Use the template's `stableEffectId(prefix,key)` for
 canonical keys instead of hand-building effect IDs.
 Before claiming `complete`, map every explicit user acceptance condition to a separate requirement;
 record count, page count, order, required IDs, and required field values must never share one generic check.
+In the runnable reference, `requiredFields` rejects missing, null, blank-string, non-finite-number, and empty collection values; a present empty key is not proof.
 Collect every bounded matching row; never invent a per-page count, page ID, or field assertion the user omitted.
+For any custom task-specific action not native to the runnable reference, declare bounded `{id,expected}` entries in
+`args.acceptance.taskFacts` and return matching measured `{id,actual,evidence?}` entries in
+`outcome.taskFacts`; IDs match exactly, expected object fields match recursively, and actual objects may retain extra measured fields. Arrays and primitives remain exact.
+Requested `human` behavior automatically adds `runtime:behavior-mode`; an evidence file alone never proves a requirement.
 For file output, `output.path/count` and `output-file` evidence must describe the same file and count.
 
 Run every `--task` as one foreground-attached command and keep consuming its stdout until the terminal

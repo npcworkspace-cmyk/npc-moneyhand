@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.3] - 2026-08-22
+
+- Derive fail-closed completion requirements from bounded task-specific facts with an exact ID set and recursive expected-object matching, while preserving extra measured receipt fields in actual results.
+- Add an automatic `runtime:behavior-mode` requirement whenever human behavior is requested.
+- Make the runnable task reference and normal-path docs expose one copyable `taskFacts` contract for custom clicks, scrolls, uploads, downloads, or other concrete actions.
+- Make `requiredFields` fail closed on blank or otherwise empty values instead of accepting keys whose business data is missing.
+- Bind each private task-evidence artifact's declared byte count and SHA-256 to the exact bytes written on disk, including its final newline.
+- Tell task authors to preserve verified browser-owned field sources when renaming output keys and to fail incomplete instead of guessing selectors that yield empty business data.
+- Make the source-identical multi-page reference emit standard `recordId/title/body/sourceUrl` rows and accept native `taskData.scrollDeltaY`, with pre-window validation plus automatically derived real scroll receipts and completion facts.
+- Make intuitive `pages[].pageKey` the primary runnable-reference input while retaining `id` as a fail-closed legacy alias, so a first-time Agent does not need to infer an internal field name.
+
 ## [1.2.2] - 2026-08-22
 
 - Treat the complete bounded-file reference as a runnable parameterized task instead of rejecting a valid source-identical copy as an unimplemented template.
