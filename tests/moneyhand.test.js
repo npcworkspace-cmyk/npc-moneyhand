@@ -1107,6 +1107,36 @@ test("runMoneyHandTask returns one TASK_TIMEOUT after abort-aware cleanup", asyn
   assert.equal(cleanupCalls, 1);
 });
 
+test("runMoneyHandTask acknowledges a deadline that expires while the task module imports", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-import-timeout-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, [
+    "await new Promise((resolve) => setTimeout(resolve, 40));",
+    "export async function run({ signal }) {",
+    "  await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));",
+    "}",
+  ].join("\n"), "utf8");
+  let cleanupCalls = 0;
+  const moneyhand = {
+    async request() {},
+    ownedTaskWindowIds() { return ["owned-import-timeout-window"]; },
+    async cleanupOwnedTaskWindows() {
+      cleanupCalls += 1;
+      return { ok: true, attempted: 1, results: [] };
+    },
+  };
+
+  await assert.rejects(
+    runMoneyHandTask({ moneyhand, taskPath, timeoutMs: 10, abortGraceMs: 100 }),
+    (error) => error.code === "TASK_TIMEOUT"
+      && error.details.taskAcknowledgedAbort === true
+      && error.details.cleanupComplete === true
+      && error.details.controllerReusable === true,
+  );
+  assert.equal(cleanupCalls, 1);
+});
+
 test("runMoneyHandTask fails closed when a task ignores abort", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-unresponsive-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

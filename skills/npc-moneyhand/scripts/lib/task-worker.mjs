@@ -85,7 +85,9 @@ parentPort.on("message", (message) => {
 
 Promise.resolve()
   .then(async () => {
+    if (taskController.signal.aborted) throw taskController.signal.reason;
     const taskModule = await import(workerData.taskModuleUrl);
+    if (taskController.signal.aborted) throw taskController.signal.reason;
     if (taskModule.MONEYHAND_TASK_TEMPLATE === "replace-before-running") {
       const error = new Error(
         "The packaged task template or an unchanged copy cannot run; copy it to a task-owned path, replace the placeholder with the concrete user task, and remove MONEYHAND_TASK_TEMPLATE before submitting",

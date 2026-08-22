@@ -3,6 +3,7 @@
 ## [1.1.1] - 2026-08-22
 
 - Deduplicate watchdog screenshots by task-activity epoch so one continuous silence cannot trigger an immediate second capture on a busy event loop.
+- Acknowledge deadlines that arrive before or during task-module import instead of letting the task miss an already-fired abort signal.
 
 ## [1.1.0] - 2026-08-22
 
