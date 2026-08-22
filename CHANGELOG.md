@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.1] - 2026-08-22
+
+- Deduplicate watchdog screenshots by task-activity epoch so one continuous silence cannot trigger an immediate second capture on a busy event loop.
+
 ## [1.1.0] - 2026-08-22
 
 - Replace the old multi-step startup with one bounded `--connect` flow and mandatory localhost-only acceptance.

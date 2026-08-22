@@ -21,7 +21,7 @@
 记录：
 
 - Git commit；
-- `1.1.0` Skill 与 Extension 版本；
+- `1.1.1` Skill 与 Extension 版本；
 - Chrome 和 Node 版本；
 - Profile 是否包含真实账号；
 - 固定端点 `ws://127.0.0.1:19846/extension`；

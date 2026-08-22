@@ -194,7 +194,7 @@ test("CLI --ensure is idempotent under concurrent startup", async (t) => {
     assert.equal(envelope.value.port, controllerPort);
     assert.equal(envelope.value.protocol, "npc-moneyhand-controller/2");
     assert.equal(envelope.value.product, "npc-moneyhand");
-    assert.equal(envelope.value.version, "1.1.0");
+    assert.equal(envelope.value.version, "1.1.1");
     assert.match(envelope.value.build, /^[a-f0-9]{64}$/u);
     assert.match(envelope.value.sourceId, /^[a-f0-9]{64}$/u);
     assert.match(envelope.value.instanceNonce, /^[a-f0-9-]{36}$/u);
@@ -343,7 +343,7 @@ test("CLI --stop preempts an unresponsive isolated task and releases its Node ha
     profile: "npc-stop-task-cli",
     instanceId: "instance_stop_task_cli",
     bootId: "boot_stop_task_cli",
-    version: "1.1.0",
+    version: "1.1.1",
     auth: { mode: "none" },
     focus: { windowId: 9, focused: true, lastFocusedAt: 9 },
     browser: { platform: { os: "test" } },
@@ -430,7 +430,7 @@ test("CLI resident controller keeps the extension connection across connect and 
     profile: "npc-resident-cli",
     instanceId: "instance_resident_cli",
     bootId: "boot_resident_cli",
-    version: "1.1.0",
+    version: "1.1.1",
     auth: { mode: "none" },
     focus: { windowId: 3, focused: true, lastFocusedAt: 3 },
     browser: { platform: { os: "test" } },
@@ -644,7 +644,7 @@ test("CLI task survives client loss and a fresh Agent follows its private journa
     profile: "npc-reattach-cli",
     instanceId: "instance_reattach_cli",
     bootId: "boot_reattach_cli",
-    version: "1.1.0",
+    version: "1.1.1",
     auth: { mode: "none" },
     focus: { windowId: 5, focused: true, lastFocusedAt: 5 },
     browser: { platform: { os: "test" } },
@@ -762,7 +762,7 @@ test("CLI exits nonzero when a task result is ok false", async (t) => {
   opened.client.sendJson({
     v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
     profile: "npc-failure-cli", instanceId: "instance_failure_cli", bootId: "boot_failure_cli",
-    version: "1.1.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    version: "1.1.1", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
     browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
   });
   await opened.client.nextJson();
@@ -815,7 +815,7 @@ test("CLI --task emits one bounded TASK_TIMEOUT when a module ignores abort", as
   opened.client.sendJson({
     v: 2, type: "hello", protocol: "npc-moneyhand/2", product: "npc-moneyhand",
     profile: "npc-timeout-cli", instanceId: "instance_timeout_cli", bootId: "boot_timeout_cli",
-    version: "1.1.0", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
+    version: "1.1.1", auth: { mode: "none" }, focus: { windowId: 1, focused: true, lastFocusedAt: 1 },
     browser: { platform: { os: "test" } }, unknownOutcomeIds: [], capabilities: { coordinateContract: "css-viewport-v1" },
   });
   await opened.client.nextJson();
@@ -864,7 +864,7 @@ test("CLI --connect returns one bounded ready result on its isolated test port",
     profile: "npc-connect-cli",
     instanceId: "instance_connect_cli",
     bootId: "boot_connect_cli",
-    version: "1.1.0",
+    version: "1.1.1",
     auth: { mode: "none" },
     focus: { windowId: 2, focused: true, lastFocusedAt: 2 },
     browser: { platform: { os: "test" } },

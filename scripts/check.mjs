@@ -18,8 +18,8 @@ const packageJson = readJson("package.json");
 const manifest = readJson("extension/manifest.json");
 
 if (packageJson.name !== "npc-moneyhand") fail("package name must be npc-moneyhand");
-if (packageJson.version !== "1.1.0") {
-  fail("package version must be 1.1.0");
+if (packageJson.version !== "1.1.1") {
+  fail("package version must be 1.1.1");
 }
 if (packageJson.dependencies || packageJson.devDependencies || packageJson.optionalDependencies) {
   fail("npc-moneyhand must not declare external dependencies");
@@ -29,7 +29,7 @@ if (existsSync(join(root, "package-lock.json"))) {
 }
 
 if (manifest.name !== "npc-moneyhand") fail("extension name must be npc-moneyhand");
-if (manifest.version !== "1.1.0") fail("extension version must be 1.1.0");
+if (manifest.version !== "1.1.1") fail("extension version must be 1.1.1");
 if (manifest.version_name !== packageJson.version) {
   fail("manifest version_name must match package version");
 }

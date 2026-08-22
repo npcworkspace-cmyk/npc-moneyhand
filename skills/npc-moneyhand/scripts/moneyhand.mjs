@@ -9199,6 +9199,7 @@ export async function runMoneyHandTask(options = {}) {
     taskExecutionId,
     activeTaskSpaceId: undefined,
     visualFallbacks: 0,
+    activitySequence: 0,
     lastActivityAt: progressStartedAt,
     lastProgressAt: 0,
     lastVisualAt: 0,
@@ -9215,6 +9216,7 @@ export async function runMoneyHandTask(options = {}) {
     finished: false,
     visualWatchdogEnabled: false,
     silenceVisualWork: undefined,
+    silenceVisualActivitySequence: undefined,
   };
   let progressQueue = Promise.resolve();
   const emitTaskOutput = async (event) => {
@@ -9321,10 +9323,15 @@ export async function runMoneyHandTask(options = {}) {
     const silenceMs = Math.max(0, now - progressState.lastActivityAt);
     const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
       && now - progressState.lastVisualAt < visualSilenceMs;
-    if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return undefined;
+    const capturedForCurrentActivity = progressState.lastVisualFallback?.captured === true
+      && progressState.silenceVisualActivitySequence === progressState.activitySequence;
+    if (silenceMs < visualSilenceMs || recentSuccessfulVisual || capturedForCurrentActivity) {
+      return capturedForCurrentActivity ? progressState.lastVisualFallback : undefined;
+    }
     if (progressState.silenceVisualWork) {
       return await progressState.silenceVisualWork;
     }
+    const visualActivitySequence = progressState.activitySequence;
     const silenceVisualWork = (async () => {
       const visualFallback = await automaticTaskVisualFallback(
         moneyhand,
@@ -9342,6 +9349,9 @@ export async function runMoneyHandTask(options = {}) {
         },
         undefined,
       );
+      if (visualFallback?.captured === true) {
+        progressState.silenceVisualActivitySequence = visualActivitySequence;
+      }
       await emitProgress({
         state: "visual_fallback",
         phase: "recovery",
@@ -9363,6 +9373,7 @@ export async function runMoneyHandTask(options = {}) {
   progressState.noteActivity = async ({ operation, operationState, force = false, taskSpaceId }) => {
     await progressState.inspectRecoveredSilence({ operation, taskSpaceId });
     const now = Date.now();
+    progressState.activitySequence += 1;
     progressState.lastActivityAt = now;
     progressState.latestOperation = operation;
     progressState.latestOperationState = operationState;
@@ -9381,6 +9392,7 @@ export async function runMoneyHandTask(options = {}) {
   const reportProgress = async (value = {}) => {
     const details = taskProgressDetails(value);
     await progressState.inspectRecoveredSilence({ operation: "task-progress" });
+    progressState.activitySequence += 1;
     progressState.lastActivityAt = Date.now();
     if (details.checkpoint !== undefined) progressState.latestCheckpoint = details.checkpoint;
     return await emitProgress({
@@ -9471,7 +9483,9 @@ export async function runMoneyHandTask(options = {}) {
     if (!progressState.visualWatchdogEnabled
       || typeof progressState.activeTaskSpaceId !== "string"
       || now - progressState.lastActivityAt < visualSilenceMs
-      || now - progressState.lastVisualAt < visualSilenceMs) {
+      || now - progressState.lastVisualAt < visualSilenceMs
+      || (progressState.lastVisualFallback?.captured === true
+        && progressState.silenceVisualActivitySequence === progressState.activitySequence)) {
       return;
     }
     if (progressState.silenceVisualWork) {
@@ -9479,6 +9493,7 @@ export async function runMoneyHandTask(options = {}) {
       return;
     }
     progressState.lastVisualAt = now;
+    const visualActivitySequence = progressState.activitySequence;
     const silenceVisualWork = (async () => {
       const visualFallback = await automaticTaskVisualFallback(
         moneyhand,
@@ -9496,6 +9511,9 @@ export async function runMoneyHandTask(options = {}) {
         },
         taskController.signal,
       );
+      if (visualFallback?.captured === true) {
+        progressState.silenceVisualActivitySequence = visualActivitySequence;
+      }
       await emitProgress({
         state: "visual_fallback",
         phase: "watchdog",
@@ -9537,7 +9555,10 @@ export async function runMoneyHandTask(options = {}) {
     await progressState.silenceVisualWork?.catch(() => {});
     const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
       && Date.now() - progressState.lastVisualAt < visualSilenceMs;
-    if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return;
+    const capturedForCurrentActivity = progressState.lastVisualFallback?.captured === true
+      && progressState.silenceVisualActivitySequence === progressState.activitySequence;
+    if (silenceMs < visualSilenceMs || recentSuccessfulVisual || capturedForCurrentActivity) return;
+    const visualActivitySequence = progressState.activitySequence;
     const visualFallback = await automaticTaskVisualFallback(
       moneyhand,
       progressState,
@@ -9554,6 +9575,9 @@ export async function runMoneyHandTask(options = {}) {
       },
       undefined,
     );
+    if (visualFallback?.captured === true) {
+      progressState.silenceVisualActivitySequence = visualActivitySequence;
+    }
     await emitProgress({
       state: "visual_fallback",
       phase: "pre-cleanup",
@@ -9581,6 +9605,7 @@ export async function runMoneyHandTask(options = {}) {
         taskExecutionId,
       });
       await taskRuntime.ready;
+      progressState.activitySequence += 1;
       progressState.lastActivityAt = Date.now();
       progressState.visualWatchdogEnabled = true;
       armDeadline();

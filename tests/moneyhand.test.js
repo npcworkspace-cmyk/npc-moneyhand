@@ -569,6 +569,52 @@ test("runMoneyHandTask keeps the watchdog responsive while synchronous task code
   assert.equal(progressEvents.at(-1).state, "completed");
 });
 
+test("runMoneyHandTask captures silence once per activity epoch and rearms after progress", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-silence-epochs-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const taskPath = join(directory, "task.mjs");
+  await writeFile(taskPath, [
+    "export async function run({ moneyhand, progress }) {",
+    "  const task = await moneyhand.beginTaskContext({ id: 'silence-epoch-task' });",
+    "  try {",
+    "    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 55);",
+    "    await progress({ phase: 'epoch-one', message: 'First silent phase completed' });",
+    "    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 55);",
+    "    await progress({ phase: 'epoch-two', message: 'Second silent phase completed' });",
+    "    return { status: 'complete', requirements: [{ id: 'two-epochs', satisfied: true }] };",
+    "  } finally {",
+    "    await moneyhand.completeTaskContext({ taskSpaceId: task.taskSpaceId });",
+    "  }",
+    "}",
+  ].join("\n"), "utf8");
+  let inspections = 0;
+  const moneyhand = {
+    async request() {},
+    async beginTaskContext() { return { taskSpaceId: "silence-epoch-task" }; },
+    ownedTaskWindowIds() { return []; },
+    async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
+    async completeTaskContext() { return { cleanupComplete: true }; },
+    async inspectTaskBlocker() {
+      inspections += 1;
+      return {
+        schema: "npc-moneyhand-visual-fallback/1",
+        captured: true,
+        screenshot: { path: join(directory, `silence-epoch-${inspections}.png`) },
+        actionReplayed: false,
+      };
+    },
+  };
+
+  const result = await runMoneyHandTask({
+    moneyhand,
+    taskPath,
+    progressIntervalMs: 10,
+    visualSilenceMs: 20,
+  });
+  assert.equal(result.status, "complete");
+  assert.equal(inspections, 2);
+});
+
 test("runMoneyHandTask starts monitoring before a task module import can hang", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "npc-moneyhand-task-import-watchdog-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
