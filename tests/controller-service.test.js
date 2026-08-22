@@ -59,7 +59,7 @@ async function writeControllerFixture(rootPath, options = {}) {
   await Promise.all([
     writeFile(join(rootPath, "package.json"), `${JSON.stringify({
       name: "npc-moneyhand",
-      version: options.version ?? "1.0.0",
+      version: options.version ?? "1.1.0",
       type: "module",
     })}\n`, "utf8"),
     writeFile(sourcePath, options.source ?? controllerFixtureSource(), "utf8"),
@@ -109,7 +109,7 @@ test("controller service is localhost-only and preserves active work past idle t
   assert.equal(response.ok, true);
   assert.equal(response.value.protocol, "npc-moneyhand-controller/2");
   assert.equal(response.value.product, "npc-moneyhand");
-  assert.equal(response.value.version, "1.0.0");
+  assert.equal(response.value.version, "1.1.0");
   assert.match(response.value.build, /^[a-f0-9]{64}$/u);
   assert.match(response.value.sourceId, /^[a-f0-9]{64}$/u);
   assert.match(response.value.instanceNonce, /^[a-f0-9-]{36}$/u);
@@ -131,7 +131,9 @@ test("controller stop closes a silent half-open client before awaiting server cl
   });
   const socket = createConnection({ host: "127.0.0.1", port });
   await once(socket, "connect");
-  const clientClosed = once(socket, "close");
+  let clientError;
+  socket.on("error", (error) => { clientError = error; });
+  const clientClosed = new Promise((resolvePromise) => socket.once("close", resolvePromise));
 
   const outcome = await Promise.race([
     service.stop().then(() => "stopped"),
@@ -140,6 +142,7 @@ test("controller stop closes a silent half-open client before awaiting server cl
 
   assert.equal(outcome, "stopped");
   await clientClosed;
+  assert.ok(clientError === undefined || clientError.code === "ECONNRESET");
   assert.equal(service.closed, true);
   assert.equal(service.server.listening, false);
 });

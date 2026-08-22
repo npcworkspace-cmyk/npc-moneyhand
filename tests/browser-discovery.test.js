@@ -31,7 +31,7 @@ const INTEGRITY_SOURCE = resolve(
   "skills/npc-moneyhand/references/extension-integrity.json",
 );
 
-async function createExtension(directory, { complete = true, version = "1.0.0" } = {}) {
+async function createExtension(directory, { complete = true, version = "1.1.0" } = {}) {
   if (complete) {
     await cp(EXTENSION_SOURCE, directory, { recursive: true });
     return;
@@ -118,7 +118,7 @@ test("fixed integrity reference covers the complete 24-file extension tree", asy
   const reference = JSON.parse(await readFile(INTEGRITY_SOURCE, "utf8"));
   assert.equal(reference.schema, EXTENSION_INTEGRITY_SCHEMA);
   assert.equal(reference.product, "npc-moneyhand");
-  assert.equal(reference.version, "1.0.0");
+  assert.equal(reference.version, "1.1.0");
   assert.equal(reference.algorithm, "sha256");
   assert.deepEqual(reference.coverage, {
     mode: "complete-extension-tree",
@@ -230,7 +230,7 @@ test("packed scan uses only Local State directory keys and returns no account id
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const browserRoot = join(temporary, "User Data");
   const profile = join(browserRoot, "Default");
-  const extension = join(profile, "Extensions", EXTENSION_ID, "1.0.0_0");
+  const extension = join(profile, "Extensions", EXTENSION_ID, "1.1.0_0");
   await createExtension(extension);
   await mkdir(profile, { recursive: true });
   await writeFile(join(browserRoot, "Local State"), JSON.stringify({
@@ -311,7 +311,7 @@ test("Local State safely discovers custom Chromium profile directory basenames",
   const browserRoot = join(temporary, "User Data");
   const workProfile = join(browserRoot, "Work");
   const personProfile = join(browserRoot, "Person 1");
-  const extension = join(workProfile, "Extensions", EXTENSION_ID, "1.0.0_0");
+  const extension = join(workProfile, "Extensions", EXTENSION_ID, "1.1.0_0");
   await Promise.all([
     createExtension(extension),
     mkdir(personProfile, { recursive: true }),
@@ -442,7 +442,7 @@ test("a matching extension name without exact release integrity is not installed
     "Default",
     "Extensions",
     EXTENSION_ID,
-    "1.0.0_0",
+    "1.1.0_0",
   );
   await createExtension(extension, { complete: false });
 
@@ -462,7 +462,7 @@ test("one modified byte fails the fixed release hash", async (t) => {
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const browserRoot = join(temporary, "User Data");
   const profile = join(browserRoot, "Default");
-  const extension = join(profile, "Extensions", EXTENSION_ID, "1.0.0_0");
+  const extension = join(profile, "Extensions", EXTENSION_ID, "1.1.0_0");
   await createExtension(extension);
   const popup = join(extension, "popup.js");
   await writeFile(popup, `${await readFile(popup, "utf8")} `, "utf8");
@@ -485,7 +485,7 @@ test("extra files, directories, and symlinks fail complete-tree integrity", asyn
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const browserRoot = join(temporary, "User Data");
   const profile = join(browserRoot, "Default");
-  const extension = join(profile, "Extensions", EXTENSION_ID, "1.0.0_0");
+  const extension = join(profile, "Extensions", EXTENSION_ID, "1.1.0_0");
   const linkTarget = join(temporary, "link-target");
   await createExtension(extension);
   await mkdir(join(extension, "extra-dir"));
@@ -517,7 +517,7 @@ test("a missing Skill integrity reference fails every otherwise exact extension 
     "Default",
     "Extensions",
     EXTENSION_ID,
-    "1.0.0_0",
+    "1.1.0_0",
   );
   const emptySkill = join(temporary, "empty-skill");
   await createExtension(extension);
@@ -861,7 +861,7 @@ test("preflight directs a missing extension to the separate GitHub Release asset
     manualInstallRequired: true,
     repositoryUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand",
     releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-    assetName: "npc-moneyhand-extension-1.0.0.zip",
+    assetName: "npc-moneyhand-extension.zip",
   });
   assert.equal(report.summary.extensionFound, false);
   assert.equal(report.summary.extensionAction, "download-from-github-release");
@@ -883,7 +883,7 @@ test("enabled, disabled, and unknown extension states are counted separately", a
     "Default",
     "Extensions",
     unknownId,
-    "1.0.0_0",
+    "1.1.0_0",
   );
   await Promise.all([
     createExtension(enabledExtension),

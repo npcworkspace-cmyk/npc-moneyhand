@@ -486,7 +486,7 @@ async function copyExtension(output) {
       sha256: await sha256(file.absolute),
     });
   }
-  const zipName = `npc-moneyhand-extension-${manifest.version_name ?? manifest.version}.zip`;
+  const zipName = "npc-moneyhand-extension.zip";
   const zipPath = join(output, zipName);
   await writeDeterministicZip(zipPath, "npc-moneyhand", files);
   return {

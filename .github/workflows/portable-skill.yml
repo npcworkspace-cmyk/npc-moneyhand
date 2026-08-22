@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest]
         node: [20, 22, 24]
     runs-on: ${{ matrix.os }}
     steps:
@@ -33,7 +33,7 @@ jobs:
         if: matrix.node == 22
         run: >-
           python scripts/agent-jsonl-conformance.py
-          -- node skills/npc-moneyhand/scripts/moneyhand.mjs --port 0
+          -- node skills/npc-moneyhand/scripts/moneyhand.mjs --internal-test-port 0
 
   release-artifact:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
         with:
           name: npc-moneyhand-portable-skill
           path: |
-            artifacts/portable-skill/npc-moneyhand-portable-skill-*.zip
+            artifacts/portable-skill/npc-moneyhand-portable-skill.zip
             artifacts/portable-skill/portable-manifest.json
             artifacts/portable-skill/SHA256SUMS.txt
           if-no-files-found: error

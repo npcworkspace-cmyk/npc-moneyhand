@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0] - 2026-08-22
+
+- Replace the old multi-step startup with one bounded `--connect` flow and mandatory localhost-only acceptance.
+- Add isolated task windows, progress/watchdog events, visual fallback, task journals, recovery summaries, effect receipts, rate gates, and completion evidence.
+- Publish stable Latest Release asset names for the portable Skill and Extension so Agents cannot mix current documentation with an older package filename.
+- Gate publishing on Windows, macOS arm64, and macOS Intel conformance of the exact release artifact.
+
 ## [1.0.0] - 2026-08-17
 
 首个正式版本。

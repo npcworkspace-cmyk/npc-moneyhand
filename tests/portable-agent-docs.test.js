@@ -20,7 +20,7 @@ test("portable Agent guide declares one bounded connect baseline and its runtime
   assert.match(guide, /Node\.js 20 or newer/u);
   assert.match(guide, /does not\s+install a daemon/u);
   assert.match(guide, /Skill archive excludes the extension/u);
-  assert.match(guide, /npc-moneyhand-extension-1\.0\.0\.zip/u);
+  assert.match(guide, /npc-moneyhand-extension\.zip/u);
   assert.match(guide, /github\.com\/npcworkspace-cmyk\/npc-moneyhand\/releases/u);
   assert.match(guide, /Never close or restart all browser processes/u);
   assert.match(guide, /follow only `nextAction`/u);

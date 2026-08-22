@@ -348,7 +348,7 @@ async function loadIntegrityReference(skillRoot, warnings, budget) {
   if (!reference) return invalid("missing-or-unreadable");
   if (reference.schema !== EXTENSION_INTEGRITY_SCHEMA
     || reference.product !== "npc-moneyhand"
-    || reference.version !== "1.0.0"
+    || reference.version !== "1.1.0"
     || reference.algorithm !== "sha256") return invalid("identity");
   if (reference.coverage?.mode !== "complete-extension-tree"
     || reference.coverage?.fileCount !== EXPECTED_INTEGRITY_FILES
@@ -1248,7 +1248,7 @@ export async function discoverMoneyHand({
         manualInstallRequired: true,
         repositoryUrl: EXTENSION_REPOSITORY_URL,
         releasesUrl: EXTENSION_RELEASES_URL,
-        assetName: `npc-moneyhand-extension-${integrityReference.version}.zip`,
+        assetName: "npc-moneyhand-extension.zip",
       },
     },
     scan: {

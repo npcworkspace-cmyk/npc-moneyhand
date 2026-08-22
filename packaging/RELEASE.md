@@ -19,7 +19,7 @@ creates a GitHub Release.
 
 The `release` workflow has two explicit publishing paths:
 
-- pushing a version tag such as `v1.0.0` automatically verifies, builds and creates the
+- pushing a version tag such as `v1.1.0` automatically verifies, builds and creates the
   matching GitHub Release;
 - a manual run with `publish: false` only builds a downloadable workflow artifact; it does not
   create or modify a GitHub Release;
@@ -28,7 +28,7 @@ The `release` workflow has two explicit publishing paths:
 
 The release workflow fails when the tag does not equal `v<package.json version>`. It creates a new
 release with `gh release create --verify-tag`; it does not silently replace an existing release.
-Before publish, Windows and macOS jobs download the exact Linux-built artifact and run
-`packaged-agent-conformance --require-all`, so the MoneyHand Skill lifecycle cannot be skipped.
+Before publish, Windows, macOS arm64 and macOS Intel jobs download the exact Linux-built artifact and
+run `packaged-agent-conformance --require-all`, so the MoneyHand Skill lifecycle cannot be skipped.
 The flat public assets are self-contained: conformance verifies extension entries inside the ZIP;
 the optional `extension/npc-moneyhand/` directory is included only in the full workflow artifact.

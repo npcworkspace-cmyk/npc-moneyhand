@@ -2337,7 +2337,7 @@ export class MoneyHand extends EventEmitter {
           automaticDownload: false,
           repositoryUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand",
           releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-          assetName: "npc-moneyhand-extension-1.0.0.zip",
+          assetName: "npc-moneyhand-extension.zip",
           manualInstallRequired: true,
         },
       },
@@ -8069,8 +8069,8 @@ function boundedConnectFailure(error, afterUserAction = false) {
       nextAction: "wait_for_user_then_retry_once",
       retryCommand: "node scripts/moneyhand.mjs --connect --after-user-action",
       releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-      releaseAsset: "npc-moneyhand-extension-1.0.0.zip",
-      userMessage: "未发现 MoneyHand 插件。请从项目 GitHub Releases 下载 npc-moneyhand-extension-1.0.0.zip，解压后在 Chromium 扩展管理页加载该目录；随后打开这个浏览器，点击工具栏里的 MoneyHand 图标和‘立即连接’。完成后告诉我‘好了’。",
+      releaseAsset: "npc-moneyhand-extension.zip",
+      userMessage: "未发现 MoneyHand 插件。请从项目 GitHub Latest Release 下载 npc-moneyhand-extension.zip，解压后在 Chromium 扩展管理页加载该目录；随后打开这个浏览器，点击工具栏里的 MoneyHand 图标和‘立即连接’。完成后告诉我‘好了’。",
     });
   }
   if (["TIMEOUT", "BROWSER_EXECUTABLE_NOT_FOUND"].includes(code)) {

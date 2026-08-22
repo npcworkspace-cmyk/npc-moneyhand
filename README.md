@@ -12,7 +12,7 @@
 
 它不是某个网站的专用爬虫，也不是一次性自动化脚本。MoneyHand 把浏览器操作、任务隔离、进度管理、异常恢复和 Skill 扩展整合成一套可复用的基础能力。
 
-[下载 Release](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases) · [快速开始](./docs/AGENT_QUICKSTART.md) · [MIT License](./LICENSE)
+[下载基础 Skill](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-portable-skill.zip) · [下载 Extension](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-extension.zip) · [快速开始](./docs/AGENT_QUICKSTART.md) · [MIT License](./LICENSE)
 
 ## 可以用来做什么
 

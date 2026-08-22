@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "npc-moneyhand",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "controlProtocol": "npc-moneyhand-control/1",
   "wireProtocol": "npc-moneyhand/2",
   "runtime": {
@@ -91,7 +91,7 @@
       "automaticDownload": false,
       "repositoryUrl": "https://github.com/npcworkspace-cmyk/npc-moneyhand",
       "releasesUrl": "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-      "assetName": "npc-moneyhand-extension-1.0.0.zip",
+      "assetName": "npc-moneyhand-extension.zip",
       "manualInstallRequired": true
     }
   },
@@ -871,7 +871,7 @@
     "builtInController": {
       "protocol": "npc-moneyhand-controller/2",
       "product": "npc-moneyhand",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "endpoint": "127.0.0.1:19845",
       "startup": "implicit-on-connect-call-or-task",
       "installation": "bundled-in-the-skill-no-separate-software",

@@ -6,9 +6,9 @@
 
 | 交付物 | 版本 | 协议 | 最低运行环境 |
 | --- | --- | --- | --- |
-| `npc-moneyhand` Skill | `1.0.0` | `npc-moneyhand-control/1`、`npc-agent-jsonl/1` | Node.js 20+ |
-| Skill 内置 controller | `1.0.0` | `npc-moneyhand-controller/2` | loopback `127.0.0.1:19845` |
-| Chrome Extension | `1.0.0` | `npc-moneyhand/2` | Chrome/Chromium 125+ |
+| `npc-moneyhand` Skill | `1.1.0` | `npc-moneyhand-control/1`、`npc-agent-jsonl/1` | Node.js 20+ |
+| Skill 内置 controller | `1.1.0` | `npc-moneyhand-controller/2` | loopback `127.0.0.1:19845` |
+| Chrome Extension | `1.1.0` | `npc-moneyhand/2` | Chrome/Chromium 125+ |
 
 三者来自同一仓库 Release。最安全的组合是相同 Git commit 或相同 release manifest；不承诺跨任意未发布提交的私有 API 兼容。
 

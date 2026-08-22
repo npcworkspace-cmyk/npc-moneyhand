@@ -16,7 +16,7 @@ const CONTRACT = "skills/npc-moneyhand/references/moneyhand-contract.json";
 const CATALOG = "skills/npc-moneyhand/references/agent-operations.json";
 const PRODUCT = {
   package: "npc-moneyhand",
-  version: "1.0.0",
+  version: "1.1.0",
   executable: "moneyhand",
   productProtocol: "npc-moneyhand-control/1",
 };
@@ -133,7 +133,7 @@ function assertDescriptor(descriptor, contract, catalog) {
     automaticDownload: false,
     repositoryUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand",
     releasesUrl: "https://github.com/npcworkspace-cmyk/npc-moneyhand/releases",
-    assetName: "npc-moneyhand-extension-1.0.0.zip",
+    assetName: "npc-moneyhand-extension.zip",
     manualInstallRequired: true,
   });
   assert.equal(contract.controlProtocol ?? contract.protocol, PRODUCT.productProtocol);

@@ -84,7 +84,7 @@ function v1ReleaseIdentity(overrides = {}) {
   };
 }
 
-test("release identity requires one 1.0.0 version across every shipped surface", () => {
+test("release identity requires one version across every shipped surface", () => {
   assert.deepEqual(assertReleaseIdentity(v1ReleaseIdentity()), {
     version: "1.0.0",
     chromeVersion: "1.0.0",
@@ -208,15 +208,15 @@ test("release build is reproducible, confined, installable and includes an npm R
   const built = await buildAgentRelease({ output: first, conformance: false });
   const repeated = await buildAgentRelease({ output: second, conformance: false });
   assert.equal(built.manifest.schema, "npc-agent-release-manifest/1");
-  assert.deepEqual(built.manifest.suite, { name: "npc-moneyhand", version: "1.0.0" });
+  assert.deepEqual(built.manifest.suite, { name: "npc-moneyhand", version: "1.1.0" });
   assert.equal(built.manifest.packages.length, 1);
   assert.equal(built.manifest.packages[0].package, "npc-moneyhand");
-  assert.equal(built.manifest.packages[0].version, "1.0.0");
-  assert.equal(built.manifest.extension.version, "1.0.0");
-  assert.equal(built.manifest.extension.versionName, "1.0.0");
+  assert.equal(built.manifest.packages[0].version, "1.1.0");
+  assert.equal(built.manifest.extension.version, "1.1.0");
+  assert.equal(built.manifest.extension.versionName, "1.1.0");
   assert.equal(
     built.manifest.extension.archive.path,
-    "npc-moneyhand-extension-1.0.0.zip",
+    "npc-moneyhand-extension.zip",
   );
   assert.equal(built.manifest.runtimeExternalPackages, 0);
   assert.equal(built.manifest.lifecycleScriptsExecuted, false);

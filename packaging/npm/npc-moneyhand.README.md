@@ -12,19 +12,20 @@ extension remains the thin execution hand.
 ## Install a release tarball
 
 ```text
-npm install --ignore-scripts ./npc-moneyhand-1.0.0.tgz
+npm install --ignore-scripts ./npc-moneyhand-1.1.0.tgz
 ```
 
-For a project-local install, use `npm exec` so no global `PATH` setup is required:
+For a project-local install, use `npm exec` so no global `PATH` setup is required. Installation is
+not complete until the same Agent turn runs the fixed connection flow:
 
 ```text
-npm exec -- moneyhand --describe
-npm exec -- moneyhand --port 19846
+npm exec -- moneyhand --connect
 ```
 
-`--describe` is offline and emits one `npc-agent-cli-descriptor/1` JSON line without starting a
-listener, consuming stdin, accessing Chrome, or producing browser input. Validate the descriptor,
-then use its operation catalog instead of guessing operation names or fields.
+`--connect` starts or reuses the bundled localhost controller and returns one bounded
+`npc-moneyhand-connect/1` result. Follow only its `nextAction`; do not select a port or start another
+listener. Advanced host integrations may call `moneyhand --describe` for one offline
+`npc-agent-cli-descriptor/1` JSON line before startup, but normal Agents do not need this step.
 
 ## Common JSONL lifecycle
 

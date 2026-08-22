@@ -45,7 +45,7 @@ node scripts/moneyhand.mjs --connect --after-user-action
 7. On `blocked`, send `userMessage` and stop.
 
 The Skill archive excludes the extension. If installation is required, the user downloads
-`npc-moneyhand-extension-1.0.0.zip` from
+`npc-moneyhand-extension.zip` from the GitHub Latest Release at
 `https://github.com/npcworkspace-cmyk/npc-moneyhand/releases`, extracts it, and loads the extracted
 directory through the Chromium extension page.
 

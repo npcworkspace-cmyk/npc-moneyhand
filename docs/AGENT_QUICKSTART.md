@@ -13,12 +13,13 @@
 “安装完成”必须包含本页第 1～2 步并在同一个 Agent 回合内返回一次有界连接/验收结果。只复制
 目录不算完成；Agent 不得把连接命令列为以后可选的下一步，不得询问用户是否现在连接或验收。
 
-从 GitHub Release 分发时，下载 `npc-moneyhand-portable-skill-1.0.0.zip`，用同一 Release 的
+从 GitHub Latest Release 分发时，下载 `npc-moneyhand-portable-skill.zip`，用同一 Release 的
 `npc-moneyhand-portable-skill-SHA256SUMS.txt` 校验后解压；ZIP 顶层的 `npc-moneyhand` 就是要
 导入的完整 Skill 目录。
 
 Skill 不包含 Extension。未安装时由用户从项目 Releases 下载并解压
-`npc-moneyhand-extension-1.0.0.zip`，再通过 Chromium 扩展管理页加载。
+`npc-moneyhand-extension.zip`，再通过 Chromium 扩展管理页加载。Skill 与 Extension 必须来自
+同一个 Latest Release，不得混用 main 源码与旧 Release 资产。
 
 ## 2. 执行唯一连接命令
 

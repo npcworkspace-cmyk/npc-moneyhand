@@ -937,12 +937,15 @@ test("runMoneyHandTask injects the task abort signal into high-level calls", asy
   ].join("\n"), "utf8");
   const controller = new AbortController();
   let observedSignal;
+  let resolveMethodStarted;
+  const methodStarted = new Promise((resolvePromise) => { resolveMethodStarted = resolvePromise; });
   const moneyhand = {
     async request() {},
     ownedTaskWindowIds() { return []; },
     async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
     async navigateTaskTab(options) {
       observedSignal = options.signal;
+      resolveMethodStarted();
       if (options.signal.aborted) throw options.signal.reason;
       await new Promise((resolvePromise, rejectPromise) => {
         options.signal.addEventListener("abort", () => rejectPromise(options.signal.reason), {
@@ -951,7 +954,13 @@ test("runMoneyHandTask injects the task abort signal into high-level calls", asy
       });
     },
   };
-  const running = runMoneyHandTask({ moneyhand, taskPath, signal: controller.signal });
+  const running = runMoneyHandTask({
+    moneyhand,
+    taskPath,
+    signal: controller.signal,
+    timeoutMs: 1_000,
+  });
+  await Promise.race([methodStarted, running]);
   const reason = new Error("controller client disconnected");
   controller.abort(reason);
   await assert.rejects(running, (error) => error === reason);

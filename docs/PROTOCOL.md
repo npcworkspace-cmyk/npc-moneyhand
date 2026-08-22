@@ -29,7 +29,7 @@
   "profile": "npc-<internal>",
   "instanceId": "stable-extension-instance",
   "bootId": "current-browser-boot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "auth": {"mode": "none"},
   "browser": {},
   "focus": {

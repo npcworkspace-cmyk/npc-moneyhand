@@ -573,7 +573,7 @@ async function writeManifestAndChecksums(
       distribution: "github-release-asset",
       repositoryUrl: REPOSITORY_URL,
       releasesUrl: RELEASES_URL,
-      assetName: `npc-moneyhand-extension-${identity.extensionManifest.version_name}.zip`,
+      assetName: "npc-moneyhand-extension.zip",
       manualInstallRequired: true,
       version: identity.extensionManifest.version,
       versionName: identity.extensionManifest.version_name,
@@ -613,7 +613,7 @@ export async function buildPortableSkill({ output = DEFAULT_OUTPUT } = {}) {
   const previous = await inspectOutputOwnership(confined);
   const builtDirectory = await mkdtemp(join(dirname(confined), ".npc-moneyhand-portable-stage-"));
   try {
-    const archiveName = `npc-moneyhand-portable-skill-${identity.rootPackage.version}.zip`;
+    const archiveName = "npc-moneyhand-portable-skill.zip";
     await writeDeterministicZip(join(builtDirectory, archiveName), prepared.payloadFiles);
     const manifest = await writeManifestAndChecksums(
       builtDirectory,
