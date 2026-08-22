@@ -59,6 +59,7 @@
         "full_page_screenshot",
         "download",
         "download_cleanup",
+        "multi_navigation_evaluate",
         "task_window_and_behavior_cleanup"
       ]
     },
@@ -566,6 +567,7 @@
       "navigateSemanticRef",
       "captureStableViewport",
       "captureFullPage",
+      "evaluateTaskTab",
       "inspectTaskBlocker",
       "resolveTaskBlocker",
       "completeTaskContext"
@@ -626,6 +628,50 @@
       "staleOrOccluded": "fresh-target-no-replay",
       "dispatchedOrUnknown": "inspect-no-replay",
       "sessionFailure": "terminal-fixed-connect-flow-once"
+    },
+    "currentDocumentEvaluation": {
+      "operation": "evaluateTaskTab",
+      "schema": "npc-moneyhand-task-evaluate/1",
+      "effect": "read-only",
+      "context": "fresh-current-default-page-on-every-call",
+      "cachedContextIdentifiersAllowed": false,
+      "returnByValue": true,
+      "awaitPromiseDefault": true,
+      "maximumExpressionBytes": 1048576,
+      "rawCdpEscapeHatch": "taskRequest-cdp.send"
+    },
+    "statusSummary": {
+      "schema": "npc-moneyhand-task-summary/1",
+      "fields": [
+        "state",
+        "phase",
+        "progress",
+        "lastCheckpoint",
+        "lastActivityAgoMs",
+        "rate",
+        "visual",
+        "nextAction"
+      ],
+      "surfaces": [
+        "task-terminal",
+        "--task-status",
+        "--task-follow-status"
+      ],
+      "followStatusTopLevelField": "taskSummary"
+    },
+    "recoveryEnvelope": {
+      "schema": "npc-moneyhand-task-recovery/1",
+      "additiveToOriginalError": true,
+      "fields": [
+        "category",
+        "rootCause",
+        "actionDispatched",
+        "retryAllowed",
+        "retryAtMs",
+        "waitingForInstruction",
+        "visualFallback",
+        "nextAction"
+      ]
     },
     "visualFallback": {
       "mode": "automatic-broad-page-anomaly",
@@ -794,7 +840,8 @@
       ],
       "terminalEvidenceFields": [
         "taskEvidence",
-        "completionGate"
+        "completionGate",
+        "taskSummary"
       ],
       "timeoutFlag": "--task-timeout-ms",
       "defaultTimeoutMs": 1800000,
@@ -897,6 +944,7 @@
     "navigateSemanticRef",
     "captureStableViewport",
     "captureFullPage",
+    "evaluateTaskTab",
     "inspectTaskBlocker",
     "resolveTaskBlocker",
     "completeTaskContext"

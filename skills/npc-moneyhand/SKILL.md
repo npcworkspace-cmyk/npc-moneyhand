@@ -62,6 +62,7 @@ opens only an ephemeral `127.0.0.1` fixture, streams progress, and verifies all 
 - task ownership plus temporary human behavior;
 - navigation and semantic observation with link metadata;
 - text input, pointer click, checkbox, select, upload, wheel scrolling, and a bounded CDP read;
+- repeated fresh-document navigation plus current-context evaluation without cached CDP context IDs;
 - stable viewport and full-page screenshots;
 - download completion followed by removal of the test file and its history entry;
 - exact task-window closure and behavior reset to `raw`.
@@ -139,6 +140,8 @@ MoneyHand's core task capabilities are:
 - fast raw behavior by default and temporary human-style input when explicitly requested;
 - structured observation with link URLs, semantic actions, direct ref navigation, bounded navigation
   waits, and real browser input;
+- one read-only `evaluateTaskTab()` helper that always targets the current default page context after
+  navigation, while retaining raw CDP as an advanced escape hatch;
 - automatic current-viewport visual fallback for waits, timeouts, occlusion, stale/ambiguous targets,
   page-health failures and other visible-page anomalies, without replaying the failed action;
 - mandatory streamed task progress, including a 10-second heartbeat and a screenshot after 15 seconds
@@ -163,6 +166,8 @@ MoneyHand's core task capabilities are:
   while cleanup, effect outcomes, rate state, instruction state, or declared requirements are unresolved;
 - machine-readable relay fields on progress, recovery, effect, rate, monitor, and terminal events so an
   Agent host can wake itself and decide which checkpoints must also be shown to the user;
+- one compact `taskSummary` on terminal/status/follow surfaces plus one additive recovery envelope on
+  terminal errors, so a new Agent follows `nextAction` before opening full logs;
 - one shared controller beneath independently distributed specialized Skills.
 
 Normal task code receives `progress({phase,message,current,total,checkpoint})`; use it at every bounded
@@ -189,6 +194,10 @@ If the attached command or Agent process is lost unexpectedly, do not submit the
 result. Use `--task-status "TASK_EXECUTION_ID"` for a one-shot status read. These commands read the
 private journal and do not start another browser task. The controller cannot create a turn inside an
 arbitrary Agent host by itself; the host must consume the relay/attached stream.
+
+On every terminal, status, or initial follow record, read `taskSummary` first and execute only its
+`nextAction`. Open larger evidence only when required. For bounded current-page JavaScript/DOM reads,
+use `evaluateTaskTab()` from `task-runtime.md`; never cache CDP context or object IDs across navigation.
 
 Read `references/task-recovery.md` only after a task timeout, controller/page-health failure, unknown
 outcome, cleanup failure, or visual blocker requires a recovery decision.

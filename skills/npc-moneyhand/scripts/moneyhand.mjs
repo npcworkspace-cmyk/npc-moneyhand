@@ -27,6 +27,7 @@ import {
 } from "./lib/controller-service.mjs";
 import {
   TaskExecutionLedger,
+  buildTaskSummary,
   createTaskExecutionId,
   latestTaskExecutionId,
   readLatestTaskExecutionStatus,
@@ -36,6 +37,7 @@ import {
 import { TaskEffectReceipts } from "./lib/task-effects.mjs";
 import {
   attachRecovery,
+  ensureTaskRecovery,
   planTaskRecovery,
 } from "./lib/task-recovery-state.mjs";
 import {
@@ -154,6 +156,7 @@ const MAX_TASK_PROGRESS_INTERVAL_MS = 60_000;
 const MAX_TASK_VISUAL_SILENCE_MS = 5 * 60_000;
 const MAX_PARALLEL_TASK_REQUESTS = 64;
 const MAX_TASK_REQUEST_CONCURRENCY = 16;
+const MAX_TASK_EVALUATION_EXPRESSION_BYTES = 1024 * 1024;
 const MAX_AUTOMATIC_VISUAL_FALLBACKS = 120;
 const TASK_FOLLOW_POLL_MS = 500;
 const TASK_CONCURRENT_VISUAL_OBSERVATION = Symbol("task-concurrent-visual-observation");
@@ -171,6 +174,7 @@ const TASK_AUTO_VISUAL_METHODS = new Set([
   "actSemanticLocator",
   "captureStableViewport",
   "captureFullPage",
+  "evaluateTaskTab",
   "taskRequest",
   "parallelTaskRequests",
   "request",
@@ -211,6 +215,7 @@ const TASK_RATE_GATED_METHODS = new Set([
   "actSemanticLocator",
   "captureStableViewport",
   "captureFullPage",
+  "evaluateTaskTab",
   "taskRequest",
   "parallelTaskRequests",
 ]);
@@ -229,6 +234,7 @@ const TASK_SIGNAL_FIRST_ARGUMENT_METHODS = new Set([
   "actSemanticLocator",
   "captureStableViewport",
   "captureFullPage",
+  "evaluateTaskTab",
   "inspectTaskBlocker",
   "resolveTaskBlocker",
   "taskRequest",
@@ -241,6 +247,7 @@ const TASK_SIGNAL_FIRST_ARGUMENT_METHODS = new Set([
 ]);
 const TASK_WHOLE_DOCUMENT_SELECTOR_HINTS = new Set(["body", "html", ":root", "document"]);
 const TASK_FIXED_EFFECTS = Object.freeze({
+  evaluateTaskTab: "read-only",
   navigateSemanticRef: "navigation",
   navigateTaskTab: "navigation",
   scrollTaskTab: "input",
@@ -290,6 +297,7 @@ const TASK_MODULE_HELPERS = Object.freeze([
   "navigateSemanticRef",
   "captureStableViewport",
   "captureFullPage",
+  "evaluateTaskTab",
   "inspectTaskBlocker",
   "resolveTaskBlocker",
   "completeTaskContext",
@@ -1369,6 +1377,53 @@ function directCdpValue(terminal, expectedMethod, options = {}) {
   return command.result;
 }
 
+function taskEvaluationTransportError(error) {
+  const cause = normalizedError(error, "TASK_EVALUATION_FAILED");
+  let detailsText = "";
+  try {
+    detailsText = JSON.stringify(cause.details ?? {});
+  } catch {
+    detailsText = "";
+  }
+  const diagnostic = `${cause.code} ${cause.message} ${detailsText}`;
+  if (/execution context was destroyed|cannot find (?:default )?context with specified id/iu.test(diagnostic)) {
+    return new MoneyHandError(
+      "TASK_EVALUATION_CONTEXT_DESTROYED",
+      "The page execution context changed before Runtime.evaluate returned",
+      {
+        actionDispatched: "unknown",
+        retry: "wait-for-current-page-then-evaluate-once",
+        cause,
+      },
+    );
+  }
+  if (/inspected target navigated or closed|frame was detached/iu.test(diagnostic)) {
+    return new MoneyHandError(
+      "TASK_EVALUATION_INTERRUPTED",
+      "Navigation or frame replacement interrupted Runtime.evaluate",
+      {
+        actionDispatched: "unknown",
+        retry: "wait-for-current-page-then-evaluate-once",
+        cause,
+      },
+    );
+  }
+  return error;
+}
+
+function taskEvaluationException(result) {
+  const details = result?.exceptionDetails ?? {};
+  return {
+    text: String(details.text ?? "Runtime.evaluate raised an exception").slice(0, 2_048),
+    ...(Number.isInteger(details.lineNumber) ? { lineNumber: details.lineNumber } : {}),
+    ...(Number.isInteger(details.columnNumber) ? { columnNumber: details.columnNumber } : {}),
+    ...(typeof details.url === "string" ? { url: details.url.slice(0, 4_096) } : {}),
+    ...(typeof details.exception?.description === "string"
+      ? { description: details.exception.description.slice(0, 4_096) }
+      : {}),
+  };
+}
+
 function semanticMainFrame(result, code = "INVALID_SEMANTIC_ACTION") {
   const frame = result?.frameTree?.frame;
   if (typeof frame?.id !== "string"
@@ -2254,6 +2309,7 @@ export class MoneyHand extends EventEmitter {
             "full_page_screenshot",
             "download",
             "download_cleanup",
+            "multi_navigation_evaluate",
             "task_window_and_behavior_cleanup",
           ],
         },
@@ -2308,7 +2364,7 @@ export class MoneyHand extends EventEmitter {
           submittedEvent: "moneyhand.task_submitted",
           taskExecutionIdSchema: "task-uuid-v4",
           statusFlags: ["--task-last", "--task-status", "--task-follow"],
-          terminalEvidenceFields: ["taskEvidence", "completionGate"],
+          terminalEvidenceFields: ["taskEvidence", "completionGate", "taskSummary"],
           timeoutFlag: "--task-timeout-ms",
           defaultTimeoutMs: DEFAULT_TASK_TIMEOUT_MS,
           maximumTimeoutMs: MAX_TASK_TIMEOUT_MS,
@@ -2678,6 +2734,46 @@ export class MoneyHand extends EventEmitter {
           staleOrOccluded: "fresh-target-no-replay",
           dispatchedOrUnknown: "inspect-no-replay",
           sessionFailure: "terminal-fixed-connect-flow-once",
+        },
+        currentDocumentEvaluation: {
+          operation: "evaluateTaskTab",
+          schema: "npc-moneyhand-task-evaluate/1",
+          effect: "read-only",
+          context: "fresh-current-default-page-on-every-call",
+          cachedContextIdentifiersAllowed: false,
+          returnByValue: true,
+          awaitPromiseDefault: true,
+          maximumExpressionBytes: MAX_TASK_EVALUATION_EXPRESSION_BYTES,
+          rawCdpEscapeHatch: "taskRequest-cdp.send",
+        },
+        statusSummary: {
+          schema: "npc-moneyhand-task-summary/1",
+          fields: [
+            "state",
+            "phase",
+            "progress",
+            "lastCheckpoint",
+            "lastActivityAgoMs",
+            "rate",
+            "visual",
+            "nextAction",
+          ],
+          surfaces: ["task-terminal", "--task-status", "--task-follow-status"],
+          followStatusTopLevelField: "taskSummary",
+        },
+        recoveryEnvelope: {
+          schema: "npc-moneyhand-task-recovery/1",
+          additiveToOriginalError: true,
+          fields: [
+            "category",
+            "rootCause",
+            "actionDispatched",
+            "retryAllowed",
+            "retryAtMs",
+            "waitingForInstruction",
+            "visualFallback",
+            "nextAction",
+          ],
         },
         visualFallback: {
           mode: "automatic-broad-page-anomaly",
@@ -5837,6 +5933,121 @@ export class MoneyHand extends EventEmitter {
       ...input,
       selector: space.selector,
     });
+  }
+
+  async evaluateTaskTab(options = {}) {
+    const input = asObject(options, "evaluateTaskTab options");
+    for (const field of ["contextId", "executionContextId", "objectId"]) {
+      if (Object.hasOwn(input, field)) {
+        throw new MoneyHandError(
+          "TASK_EVALUATION_CONTEXT_FORBIDDEN",
+          `evaluateTaskTab does not accept '${field}'; every call uses the current default page context`,
+          { actionDispatched: false, field },
+        );
+      }
+    }
+    const taskSpaceId = requiredTaskSpaceId(input.taskSpaceId ?? input.id);
+    const space = this.taskSpaces.assertAgentControl(taskSpaceId);
+    const tabId = taskSpaceTabId(space, input.tabId);
+    if (typeof input.expression !== "string" || input.expression.length < 1
+      || Buffer.byteLength(input.expression, "utf8") > MAX_TASK_EVALUATION_EXPRESSION_BYTES) {
+      throw new MoneyHandError(
+        "INVALID_TASK_EVALUATION",
+        `expression must be 1-${MAX_TASK_EVALUATION_EXPRESSION_BYTES} UTF-8 bytes`,
+        { actionDispatched: false },
+      );
+    }
+    if (input.awaitPromise !== undefined && typeof input.awaitPromise !== "boolean") {
+      throw new MoneyHandError(
+        "INVALID_TASK_EVALUATION",
+        "awaitPromise must be a boolean",
+        { actionDispatched: false },
+      );
+    }
+    if (input.effect !== undefined && input.effect !== "read-only") {
+      throw new MoneyHandError(
+        "INVALID_TASK_EFFECT",
+        "evaluateTaskTab always uses effect 'read-only'",
+        { actionDispatched: false, expectedEffect: "read-only" },
+      );
+    }
+    let runtime;
+    try {
+      const terminal = await this.taskRequest({
+        taskSpaceId,
+        effect: "read-only",
+        request: {
+          method: "cdp.send",
+          params: {
+            target: { tabId },
+            method: "Runtime.evaluate",
+            params: {
+              expression: input.expression,
+              returnByValue: true,
+              awaitPromise: input.awaitPromise ?? true,
+              silent: true,
+            },
+          },
+        },
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      runtime = directCdpValue(terminal, "Runtime.evaluate", {
+        code: "TASK_EVALUATION_FAILED",
+        label: "Task page evaluation",
+      });
+    } catch (error) {
+      throw taskEvaluationTransportError(error);
+    }
+    if (runtime.exceptionDetails) {
+      throw new MoneyHandError(
+        "TASK_EVALUATION_EXCEPTION",
+        "Runtime.evaluate raised an exception in the current page",
+        {
+          actionDispatched: true,
+          retry: "inspect-current-page-and-fix-expression",
+          exception: taskEvaluationException(runtime),
+        },
+      );
+    }
+    const remote = runtime.result;
+    if (!remote || typeof remote !== "object" || Array.isArray(remote)
+      || typeof remote.type !== "string") {
+      throw new MoneyHandError(
+        "TASK_EVALUATION_INVALID_RESULT",
+        "Runtime.evaluate returned an invalid RemoteObject",
+        { actionDispatched: true, retry: "inspect-current-page-before-retry" },
+      );
+    }
+    const hasValue = Object.hasOwn(remote, "value");
+    const isUndefined = remote.type === "undefined";
+    const hasUnserializableValue = typeof remote.unserializableValue === "string";
+    if (!hasValue && !isUndefined && !hasUnserializableValue) {
+      throw new MoneyHandError(
+        "TASK_EVALUATION_NOT_SERIALIZABLE",
+        "Runtime.evaluate did not return a value that can cross the task boundary",
+        {
+          actionDispatched: true,
+          retry: "change-expression-to-return-serializable-data",
+          valueType: remote.type,
+          ...(typeof remote.subtype === "string" ? { subtype: remote.subtype } : {}),
+          ...(typeof remote.description === "string"
+            ? { description: remote.description.slice(0, 4_096) }
+            : {}),
+        },
+      );
+    }
+    return {
+      schema: "npc-moneyhand-task-evaluate/1",
+      taskSpaceId,
+      tabId,
+      valueType: remote.type,
+      ...(typeof remote.subtype === "string" ? { subtype: remote.subtype } : {}),
+      hasValue,
+      isUndefined,
+      ...(hasValue ? { value: remote.value } : {}),
+      ...(hasUnserializableValue ? { unserializableValue: remote.unserializableValue } : {}),
+    };
   }
 
   async parallelTaskRequests(options = {}) {
@@ -9003,6 +9214,7 @@ export async function runMoneyHandTask(options = {}) {
     taskSettled: false,
     finished: false,
     visualWatchdogEnabled: false,
+    silenceVisualWork: undefined,
   };
   let progressQueue = Promise.resolve();
   const emitTaskOutput = async (event) => {
@@ -9102,22 +9314,24 @@ export async function runMoneyHandTask(options = {}) {
     return await emitTaskOutput(event);
   };
   progressState.inspectRecoveredSilence = async ({ operation, taskSpaceId } = {}) => {
-    if (progressState.visualWatchdogEnabled !== true || progressState.taskSettled) return undefined;
+    const pinnedTaskSpaceId = taskSpaceId ?? progressState.activeTaskSpaceId;
+    if (progressState.visualWatchdogEnabled !== true || progressState.taskSettled
+      || typeof pinnedTaskSpaceId !== "string") return undefined;
     const now = Date.now();
     const silenceMs = Math.max(0, now - progressState.lastActivityAt);
     const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
       && now - progressState.lastVisualAt < visualSilenceMs;
     if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return undefined;
-    if (progressState.recoveredSilenceVisualWork) {
-      return await progressState.recoveredSilenceVisualWork;
+    if (progressState.silenceVisualWork) {
+      return await progressState.silenceVisualWork;
     }
-    progressState.recoveredSilenceVisualWork = (async () => {
+    const silenceVisualWork = (async () => {
       const visualFallback = await automaticTaskVisualFallback(
         moneyhand,
         progressState,
         "task-recovered-silence",
         {
-          taskSpaceId: taskSpaceId ?? progressState.activeTaskSpaceId,
+          taskSpaceId: pinnedTaskSpaceId,
           [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
         },
         {
@@ -9137,10 +9351,13 @@ export async function runMoneyHandTask(options = {}) {
       });
       return visualFallback;
     })();
+    progressState.silenceVisualWork = silenceVisualWork;
     try {
-      return await progressState.recoveredSilenceVisualWork;
+      return await silenceVisualWork;
     } finally {
-      progressState.recoveredSilenceVisualWork = undefined;
+      if (progressState.silenceVisualWork === silenceVisualWork) {
+        progressState.silenceVisualWork = undefined;
+      }
     }
   };
   progressState.noteActivity = async ({ operation, operationState, force = false, taskSpaceId }) => {
@@ -9252,39 +9469,51 @@ export async function runMoneyHandTask(options = {}) {
       });
     }
     if (!progressState.visualWatchdogEnabled
+      || typeof progressState.activeTaskSpaceId !== "string"
       || now - progressState.lastActivityAt < visualSilenceMs
       || now - progressState.lastVisualAt < visualSilenceMs) {
       return;
     }
-    if (progressState.recoveredSilenceVisualWork) {
-      await progressState.recoveredSilenceVisualWork;
+    if (progressState.silenceVisualWork) {
+      await progressState.silenceVisualWork;
       return;
     }
     progressState.lastVisualAt = now;
-    const visualFallback = await automaticTaskVisualFallback(
-      moneyhand,
-      progressState,
-      "task-silence-watchdog",
-      {
-        taskSpaceId: progressState.activeTaskSpaceId,
-        [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
-      },
-      {
-        code: "TASK_PROGRESS_SILENCE",
-        message: `No browser-task activity completed within ${visualSilenceMs}ms`,
-        actionDispatched: "task-dependent",
-        retry: "do-not-replay-inspect-current-page",
-      },
-      taskController.signal,
-    );
-    await emitProgress({
-      state: "visual_fallback",
-      phase: "watchdog",
-      operation: progressState.latestOperation,
-      operationState: progressState.latestOperationState,
-      message: "MoneyHand captured the current page because task feedback was silent",
-      visualFallback,
-    });
+    const silenceVisualWork = (async () => {
+      const visualFallback = await automaticTaskVisualFallback(
+        moneyhand,
+        progressState,
+        "task-silence-watchdog",
+        {
+          taskSpaceId: progressState.activeTaskSpaceId,
+          [TASK_CONCURRENT_VISUAL_OBSERVATION]: true,
+        },
+        {
+          code: "TASK_PROGRESS_SILENCE",
+          message: `No browser-task activity completed within ${visualSilenceMs}ms`,
+          actionDispatched: "task-dependent",
+          retry: "do-not-replay-inspect-current-page",
+        },
+        taskController.signal,
+      );
+      await emitProgress({
+        state: "visual_fallback",
+        phase: "watchdog",
+        operation: progressState.latestOperation,
+        operationState: progressState.latestOperationState,
+        message: "MoneyHand captured the current page because task feedback was silent",
+        visualFallback,
+      });
+      return visualFallback;
+    })();
+    progressState.silenceVisualWork = silenceVisualWork;
+    try {
+      await silenceVisualWork;
+    } finally {
+      if (progressState.silenceVisualWork === silenceVisualWork) {
+        progressState.silenceVisualWork = undefined;
+      }
+    }
   };
   const progressTimer = setInterval(() => {
     progressTickQueue = progressTickQueue
@@ -9305,7 +9534,7 @@ export async function runMoneyHandTask(options = {}) {
     progressState.visualWatchdogEnabled = false;
     clearInterval(progressTimer);
     await progressTickQueue.catch(() => {});
-    await progressState.recoveredSilenceVisualWork?.catch(() => {});
+    await progressState.silenceVisualWork?.catch(() => {});
     const recentSuccessfulVisual = progressState.lastVisualFallback?.captured === true
       && Date.now() - progressState.lastVisualAt < visualSilenceMs;
     if (silenceMs < visualSilenceMs || recentSuccessfulVisual) return;
@@ -9541,6 +9770,13 @@ export async function runMoneyHandTask(options = {}) {
       { completionGate, actionDispatched: false },
     );
   }
+  if (taskError) {
+    taskError = ensureTaskRecovery(taskError, {
+      operation: progressState.latestOperation ?? "task",
+      attempt: 1,
+      hasTaskPage: typeof progressState.activeTaskSpaceId === "string",
+    });
+  }
   let evidenceArtifact;
   if (typeof input.onEvidence === "function") {
     try {
@@ -9575,7 +9811,17 @@ export async function runMoneyHandTask(options = {}) {
     cleanup,
     ...(evidenceArtifact === undefined ? {} : { artifact: evidenceArtifact }),
   });
-  await input.onFinal?.({ taskEvidence, completionGate });
+  const summaryAtMs = Date.now();
+  const taskSummary = buildTaskSummary({
+    state: taskError ? "failed" : "completed",
+    evidence: taskEvidence,
+    terminal: taskError
+      ? { ok: false, error: normalizedError(taskError) }
+      : { ok: true, value: taskValue },
+    updatedAt: new Date(summaryAtMs).toISOString(),
+    now: () => summaryAtMs,
+  });
+  await input.onFinal?.({ taskEvidence, completionGate, taskSummary });
   if (taskError) {
     if (typeof taskError === "object") {
       taskError.details = {
@@ -9718,6 +9964,7 @@ function taskStatusEvent(status) {
     event: "moneyhand.task_status",
     schema: "npc-moneyhand-task-status/1",
     taskExecutionId: status.taskExecutionId,
+    taskSummary: status.taskSummary,
     status,
     relay: taskEventRelay({
       state: status.state,
@@ -10081,6 +10328,24 @@ function controllerCommandError(error, fallbackCode = "MONEYHAND_TASK_FAILED") {
   return { failure, normalized };
 }
 
+function taskTerminalFailure(error, taskFinal, operation = "task-terminal") {
+  const recovered = ensureTaskRecovery(error, { operation, attempt: 1, hasTaskPage: false });
+  const normalized = normalizedError(recovered, "MONEYHAND_TASK_FAILED");
+  const atMs = Date.now();
+  const taskSummary = buildTaskSummary({
+    state: "failed",
+    evidence: taskFinal?.taskEvidence,
+    terminal: { ok: false, error: normalized },
+    updatedAt: new Date(atMs).toISOString(),
+    now: () => atMs,
+  });
+  return {
+    recovered,
+    normalized,
+    final: { ...(taskFinal ?? {}), taskSummary },
+  };
+}
+
 async function runControllerServiceProcess(cli) {
   const moneyhand = createMoneyHand(cliMoneyHandOptions(cli));
   const taskAbortGraceMs = resolvedTaskAbortGraceMs(cli.taskAbortGraceMs);
@@ -10301,13 +10566,16 @@ async function runControllerServiceProcess(cli) {
             });
             return;
           }
-          const { failure, normalized } = controllerCommandError(error);
+          const taskFailure = request.command === "task"
+            ? taskTerminalFailure(error, taskFinal, "controller-task-terminal")
+            : undefined;
+          const { failure, normalized } = controllerCommandError(taskFailure?.recovered ?? error);
           await send({
             type: "result",
             id: request.command,
             ok: false,
             error: normalized,
-            ...(taskFinal === undefined ? {} : taskFinal),
+            ...(taskFailure?.final ?? (taskFinal === undefined ? {} : taskFinal)),
             ...(request.command === "task" ? {
               relay: taskEventRelay({
                 state: "failed",
@@ -10731,13 +10999,16 @@ async function main(cliOutput) {
             value: boundedConnectFailure(error, afterUserAction),
           }));
         } else {
-          taskError = normalizedError(error, "MONEYHAND_TASK_FAILED");
+          const taskFailure = taskPath
+            ? taskTerminalFailure(error, directTaskFinal, "direct-task-terminal")
+            : undefined;
+          taskError = taskFailure?.normalized ?? normalizedError(error, "MONEYHAND_TASK_FAILED");
           await writeFatalLine(output, JSON.stringify({
             type: "result",
             id: taskPath ? "task" : "call",
             ok: false,
             error: taskError,
-            ...(directTaskFinal === undefined ? {} : directTaskFinal),
+            ...(taskFailure?.final ?? (directTaskFinal === undefined ? {} : directTaskFinal)),
             ...(taskPath ? {
               relay: taskEventRelay({
                 state: "failed",

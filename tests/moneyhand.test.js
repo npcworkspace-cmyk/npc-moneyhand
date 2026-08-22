@@ -28,7 +28,7 @@ test("connect acceptance keeps the fixed checklist total after an early failure"
   const acceptance = moneyhandTest.connectAcceptanceResult({
     outcome: {
       status: "incomplete",
-      total: 15,
+      total: 16,
       reason: "FULL_PAGE_CAPTURE_FAILED",
       checks: Array.from({ length: 12 }, (_, index) => ({
         name: `check-${index + 1}`,
@@ -42,7 +42,7 @@ test("connect acceptance keeps the fixed checklist total after an early failure"
     },
   });
   assert.equal(acceptance.passed, 11);
-  assert.equal(acceptance.total, 15);
+  assert.equal(acceptance.total, 16);
   assert.equal(acceptance.status, "failed");
 });
 
@@ -287,6 +287,7 @@ test("runMoneyHandTask emits mandatory progress and visually inspects a silent a
   const moneyhand = {
     async request() {},
     async beginTaskContext() {
+      await new Promise((resolve) => setTimeout(resolve, 30));
       return { taskSpaceId: "progress-task" };
     },
     async inspectTaskBlocker(options) {
@@ -329,7 +330,11 @@ test("runMoneyHandTask emits mandatory progress and visually inspects a silent a
   assert.equal(visual.silenceMs >= 20, true);
   assert.equal(inspections.length >= 1, true);
   assert.equal(inspections.length <= 120, true);
-  assert.equal(inspections[0].operation, "task-silence-watchdog");
+  assert.equal(
+    ["task-silence-watchdog", "task-recovered-silence"].includes(inspections[0].operation),
+    true,
+  );
+  assert.equal(inspections[0].taskSpaceId, "progress-task");
   assert.equal(progressEvents.at(-1).state, "completed");
 });
 
@@ -535,7 +540,9 @@ test("runMoneyHandTask keeps the watchdog responsive while synchronous task code
       inspections += 1;
       activeInspections += 1;
       ordering.push("visual");
-      await new Promise((resolve) => setTimeout(resolve, inspections === 1 ? 25 : 80));
+      // Keep the first watchdog capture in flight after the worker resumes. The
+      // recovery path must join that work instead of starting a second capture.
+      await new Promise((resolve) => setTimeout(resolve, 80));
       activeInspections -= 1;
       return {
         schema: "npc-moneyhand-visual-fallback/1",
@@ -7047,6 +7054,105 @@ test("Task spaces pin a Profile and stop writes while user control is active", a
       },
     }),
     (error) => error.code === "TASK_SPACE_UNSCOPED_MUTATION",
+  );
+});
+
+test("evaluateTaskTab always uses the current default context and normalizes values, undefined, and exceptions", async (t) => {
+  const moneyhand = await startMoneyHand(t);
+  const { client } = await connectExtension(moneyhand, t);
+  await moneyhand.createTaskSpace({ id: "task-evaluate", tabIds: [42] });
+
+  const evaluated = moneyhand.evaluateTaskTab({
+    taskSpaceId: "task-evaluate",
+    expression: "Promise.resolve({ answer: 42 })",
+  });
+  let request = await client.nextJson();
+  assert.equal(request.method, "cdp.send");
+  assert.equal(request.params.method, "Runtime.evaluate");
+  assert.deepEqual(request.params.target, { tabId: 42 });
+  assert.equal(request.params.params.expression, "Promise.resolve({ answer: 42 })");
+  assert.equal(request.params.params.returnByValue, true);
+  assert.equal(request.params.params.awaitPromise, true);
+  assert.equal(request.params.params.silent, true);
+  assert.equal(Object.hasOwn(request.params.params, "contextId"), false);
+  assert.equal(Object.hasOwn(request.params.params, "objectId"), false);
+  respondCdp(client, request, {
+    result: { type: "object", value: { answer: 42 } },
+  });
+  assert.deepEqual(await evaluated, {
+    schema: "npc-moneyhand-task-evaluate/1",
+    taskSpaceId: "task-evaluate",
+    tabId: 42,
+    valueType: "object",
+    hasValue: true,
+    isUndefined: false,
+    value: { answer: 42 },
+  });
+
+  const undefinedValue = moneyhand.evaluateTaskTab({
+    taskSpaceId: "task-evaluate",
+    expression: "void 0",
+    awaitPromise: false,
+  });
+  request = await client.nextJson();
+  assert.equal(request.params.params.awaitPromise, false);
+  respondCdp(client, request, { result: { type: "undefined" } });
+  assert.deepEqual(await undefinedValue, {
+    schema: "npc-moneyhand-task-evaluate/1",
+    taskSpaceId: "task-evaluate",
+    tabId: 42,
+    valueType: "undefined",
+    hasValue: false,
+    isUndefined: true,
+  });
+
+  const exceptional = moneyhand.evaluateTaskTab({
+    taskSpaceId: "task-evaluate",
+    expression: "throw new Error('fixture boom')",
+  });
+  request = await client.nextJson();
+  respondCdp(client, request, {
+    result: { type: "object", subtype: "error", description: "Error: fixture boom" },
+    exceptionDetails: {
+      text: "Uncaught",
+      lineNumber: 0,
+      columnNumber: 0,
+      exception: { description: "Error: fixture boom" },
+    },
+  });
+  await assert.rejects(
+    exceptional,
+    (error) => error.code === "TASK_EVALUATION_EXCEPTION"
+      && error.details?.actionDispatched === true
+      && error.details?.exception?.description === "Error: fixture boom",
+  );
+
+  const interrupted = moneyhand.evaluateTaskTab({
+    taskSpaceId: "task-evaluate",
+    expression: "document.title",
+  });
+  request = await client.nextJson();
+  respond(client, request, {
+    ok: false,
+    error: {
+      code: "CDP_COMMAND_FAILED",
+      message: "Execution context was destroyed, most likely because of a navigation.",
+    },
+  });
+  await assert.rejects(
+    interrupted,
+    (error) => error.code === "TASK_EVALUATION_CONTEXT_DESTROYED"
+      && error.details?.actionDispatched === "unknown"
+      && error.details?.cause?.code === "TASK_EVALUATION_FAILED",
+  );
+
+  await assert.rejects(
+    moneyhand.evaluateTaskTab({
+      taskSpaceId: "task-evaluate",
+      expression: "document.title",
+      contextId: 7,
+    }),
+    (error) => error.code === "TASK_EVALUATION_CONTEXT_FORBIDDEN",
   );
 });
 

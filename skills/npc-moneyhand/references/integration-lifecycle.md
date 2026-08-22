@@ -20,10 +20,12 @@ controller. It is not separately installed daemon software: it is another invoca
 idle minutes. Do not run `--ensure` in the normal Agent flow. The Extension continues to connect to
 `127.0.0.1:19846`.
 
-A normal `--connect` then runs one mandatory 15-item acceptance in an owned window against an
+A normal `--connect` then runs one mandatory 16-item acceptance in an owned window against an
 ephemeral `127.0.0.1` fixture. It streams checklist progress, removes its test download and history
 entry, closes the window, resets behavior to `raw`, and returns `ready_for_tasks` only after every
-check succeeds. This is the sole startup browser test; an Agent never adds or skips one.
+check succeeds. It also navigates across fresh documents and evaluates each current page without a
+cached execution-context identifier. This is the sole startup browser test; an Agent never adds or
+skips one.
 
 Controller reuse uses `npc-moneyhand-controller/2`, not a successful TCP connection alone. Status
 contains `status`, `host`, `port`, `pid`, `active`, `protocol`, `product`, `version`, `build`,
@@ -161,9 +163,16 @@ Space operations by navigated origin + pinned Profile. Specialized code uses exp
 for richer account/header/batch evidence.
 
 A claimed complete value must declare requirements and evidence. After task-window cleanup the
-terminal envelope adds `taskEvidence` and `completionGate`; unresolved effect outcomes, open or
+terminal envelope adds `taskEvidence`, `completionGate`, and compact `taskSummary`; unresolved effect outcomes, open or
 missing-checkpoint rate state, instruction waits, failed cleanup, or unsatisfied requirements produce
 `TASK_COMPLETION_GATE_FAILED`.
+
+Read `taskSummary` first on the terminal, `--task-status`, and the initial `--task-follow` status. It
+contains only state, phase, numeric progress, last checkpoint/activity age, current rate/visual state,
+and one `nextAction`. The follow status exposes the same object both at top level and inside `status`.
+Every terminal task error preserves its original code/message/details and adds
+`error.details.recovery`, whose stable fields classify the cause, dispatch certainty, retry timing,
+instruction/visual state, and one next action.
 
 Task modules have a 30-minute default execution budget. Set `--task-timeout-ms` or
 `NPC_MONEYHAND_TASK_TIMEOUT_MS` explicitly for a longer bounded task, up to 24 hours. The wrapper

@@ -15,6 +15,7 @@ import { basename, join, resolve } from "node:path";
 export const TASK_LEDGER_SCHEMA = "npc-moneyhand-task-ledger/1";
 export const TASK_LEDGER_EVENT_SCHEMA = "npc-moneyhand-task-ledger-event/1";
 export const TASK_STATUS_SCHEMA = "npc-moneyhand-task-status/1";
+export const TASK_SUMMARY_SCHEMA = "npc-moneyhand-task-summary/1";
 
 const TASK_EXECUTION_ID = /^task-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const BUILD_ID = /^[a-f0-9]{64}$/u;
@@ -190,7 +191,106 @@ function controllerMatches(expected, current) {
     && expected.build === current.build);
 }
 
-function publicStatus(meta, entries, currentController) {
+function latest(values, predicate = () => true) {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    if (predicate(values[index])) return values[index];
+  }
+  return undefined;
+}
+
+function evidenceFromEntries(entries) {
+  const messages = entries.map((entry) => entry.message);
+  const progress = messages.filter((message) => message.event === "moneyhand.task_progress");
+  return {
+    progress,
+    checkpoints: progress
+      .filter((message) => typeof message.checkpoint === "string")
+      .map((message) => ({ checkpoint: message.checkpoint })),
+    visuals: progress
+      .filter((message) => message.visualFallback !== undefined)
+      .map((message) => ({
+        captured: message.visualFallback?.captured === true,
+        path: message.visualFallback?.screenshot?.path ?? null,
+        waitingForInstruction: message.visualFallback?.waitingForInstruction === true,
+      })),
+    rateControl: messages.filter((message) => message.event === "moneyhand.task_rate_control"),
+    recoveries: messages.filter((message) => message.event === "moneyhand.task_recovery"),
+  };
+}
+
+function summaryNextAction(state, rate, visual, recovery, terminal) {
+  if (state === "completed") return "none";
+  if (state === "interrupted") return "restart-from-last-checkpoint";
+  if (visual?.waitingForInstruction === true || recovery?.waitingForInstruction === true) {
+    return "resolve-task-blocker";
+  }
+  if (state === "failed") {
+    return terminal?.error?.details?.recovery?.nextAction
+      ?? recovery?.nextAction
+      ?? "inspect-terminal-error";
+  }
+  if (rate?.stop === true) return "stop-and-preserve-checkpoint";
+  if (rate?.waitMs > 0) return "wait-for-rate-window";
+  if (typeof recovery?.nextAction === "string") return recovery.nextAction;
+  return "continue-task-follow";
+}
+
+export function buildTaskSummary(options = {}) {
+  const state = typeof options.state === "string" ? options.state : "interrupted";
+  const evidence = options.evidence && typeof options.evidence === "object"
+    ? options.evidence
+    : {};
+  const progress = Array.isArray(evidence.progress) ? evidence.progress : [];
+  const checkpoints = Array.isArray(evidence.checkpoints) ? evidence.checkpoints : [];
+  const rateControl = Array.isArray(evidence.rateControl) ? evidence.rateControl : [];
+  const visuals = Array.isArray(evidence.visuals) ? evidence.visuals : [];
+  const recoveries = Array.isArray(evidence.recoveries) ? evidence.recoveries : [];
+  const lastProgress = latest(progress);
+  const countedProgress = latest(progress, (entry) => (
+    Number.isFinite(entry?.current) || Number.isFinite(entry?.total)
+  ));
+  const checkpoint = latest(checkpoints, (entry) => typeof entry?.checkpoint === "string");
+  const latestRate = latest(rateControl);
+  const latestVisual = latest(visuals);
+  const latestRecovery = options.terminal?.error?.details?.recovery ?? latest(recoveries);
+  const rate = latestRate ? {
+    state: typeof latestRate.state === "string" ? latestRate.state : null,
+    phase: typeof latestRate.phase === "string" ? latestRate.phase : null,
+    waitMs: Number.isFinite(latestRate.waitMs) ? Math.max(0, latestRate.waitMs) : 0,
+    stop: latestRate.stop === true,
+    checkpointRequired: latestRate.checkpointRequired === true,
+  } : null;
+  const visual = latestVisual ? {
+    captured: latestVisual.captured === true,
+    path: typeof latestVisual.path === "string" ? latestVisual.path : null,
+    waitingForInstruction: latestVisual.waitingForInstruction === true,
+  } : null;
+  const updatedAtMs = Date.parse(options.updatedAt ?? "");
+  const now = typeof options.now === "function" ? options.now() : Date.now();
+  const phase = state === "completed" || state === "failed"
+    ? "complete"
+    : state === "interrupted"
+      ? "interrupted"
+      : typeof lastProgress?.phase === "string"
+        ? lastProgress.phase
+        : typeof latestRate?.phase === "string" ? latestRate.phase : "task";
+  return {
+    schema: TASK_SUMMARY_SCHEMA,
+    state,
+    phase,
+    progress: {
+      current: Number.isFinite(countedProgress?.current) ? countedProgress.current : null,
+      total: Number.isFinite(countedProgress?.total) ? countedProgress.total : null,
+    },
+    lastCheckpoint: checkpoint?.checkpoint ?? null,
+    lastActivityAgoMs: Number.isFinite(updatedAtMs) ? Math.max(0, now - updatedAtMs) : null,
+    rate,
+    visual,
+    nextAction: summaryNextAction(state, rate, visual, latestRecovery, options.terminal),
+  };
+}
+
+function publicStatus(meta, entries, currentController, now) {
   const last = entries.at(-1);
   const terminalEntry = [...entries].reverse().find((entry) => (
     entry.message?.type === "result" && entry.message?.id === "task"
@@ -201,12 +301,14 @@ function publicStatus(meta, entries, currentController) {
   const state = terminalEntry
     ? (terminalEntry.message.ok === true ? "completed" : "failed")
     : controllerMatches(meta.controller, currentController) ? "running" : "interrupted";
+  const updatedAt = last?.at ?? meta.startedAt;
+  const evidence = terminalEntry?.message?.taskEvidence ?? evidenceFromEntries(entries);
   return {
     schema: TASK_STATUS_SCHEMA,
     taskExecutionId: meta.taskExecutionId,
     state,
     startedAt: meta.startedAt,
-    updatedAt: last?.at ?? meta.startedAt,
+    updatedAt,
     build: meta.build,
     controller: { ...meta.controller },
     task: { ...meta.task },
@@ -214,6 +316,13 @@ function publicStatus(meta, entries, currentController) {
     lastProgress: lastProgressEntry?.message ?? null,
     terminal: terminalEntry?.message ?? null,
     reattachable: state === "running",
+    taskSummary: buildTaskSummary({
+      state,
+      evidence,
+      terminal: terminalEntry?.message,
+      updatedAt,
+      now,
+    }),
   };
 }
 
@@ -432,7 +541,7 @@ export async function readTaskExecutionEntries(options = {}) {
 
 export async function readTaskExecutionStatus(options = {}) {
   const { meta, entries } = await readTaskExecutionEntries({ ...options, afterSequence: 0 });
-  return publicStatus(meta, entries, options.controller);
+  return publicStatus(meta, entries, options.controller, options.now);
 }
 
 export async function latestTaskExecutionId(options = {}) {

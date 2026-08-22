@@ -55,11 +55,13 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
   try {
     await progress({ phase: "start", message: "Task context is ready" });
     // Replace this bounded placeholder with task-specific logic. Prefer:
-    // navigateTaskTab, semantic actions, scrollTaskTab and captureStableViewport.
+    // navigateTaskTab, evaluateTaskTab, semantic actions, scrollTaskTab and captureStableViewport.
     // In this task runner, captureSemanticSnapshot needs tabId but no selector;
     // selector is a browser-session object, never CSS. Type uses text; select uses options.
     // navigateTaskTab/navigateSemanticRef inject effect "navigation" and scrollTaskTab
     // injects effect "input"; provide a stable effectId but do not guess those effects.
+    // evaluateTaskTab is read-only and selects the current default page context on every call;
+    // do not cache contextId/objectId across navigation.
     // Give each replay-sensitive call a stable effectId such as
     // `collect:${canonicalItemId}:open`; never derive it from a loop attempt number.
     outcome = {

@@ -14,6 +14,7 @@ function fakeMoneyHand(options = {}) {
     clicks: 1,
     scrollY: 700,
   };
+  let currentUrl = "about:blank";
   const api = {
     calls,
     async beginTaskContext(input) {
@@ -31,6 +32,7 @@ function fakeMoneyHand(options = {}) {
       if (options.failNavigation) {
         throw Object.assign(new Error("fixture navigation failed"), { code: "NAVIGATION_FAILED" });
       }
+      currentUrl = input.url;
       return { loaded: true, navigation: { transport: "chrome.tabs.update" } };
     },
     async captureSemanticSnapshot(input) {
@@ -72,11 +74,18 @@ function fakeMoneyHand(options = {}) {
       calls.push({ method: "scrollTaskTab", input });
       return { actionDispatched: true };
     },
-    async taskRequest(input) {
-      calls.push({ method: "taskRequest", input });
+    async evaluateTaskTab(input) {
+      calls.push({ method: "evaluateTaskTab", input });
       return {
-        ok: true,
-        result: { method: "cdp.send", result: { result: { value: state } } },
+        schema: "npc-moneyhand-task-evaluate/1",
+        hasValue: true,
+        value: input.expression.includes("#acceptance-text")
+          ? state
+          : {
+              href: currentUrl,
+              title: "MoneyHand automatic acceptance",
+              fixture: true,
+            },
       };
     },
     async captureStableViewport(input) {
@@ -118,15 +127,15 @@ test("automatic connect acceptance exercises the safe localhost browser checklis
   });
 
   assert.equal(result.outcome.status, "complete");
-  assert.equal(result.outcome.checks.length, 15);
+  assert.equal(result.outcome.checks.length, 16);
   assert.equal(result.outcome.checks.every((check) => check.status === "passed"), true);
   assert.deepEqual(result.lifecycle, {
     cleanupComplete: true,
     windowClosed: true,
     behaviorReset: "raw",
   });
-  assert.equal(progress.at(-1).current, 15);
-  assert.equal(progress.at(-1).total, 15);
+  assert.equal(progress.at(-1).current, 16);
+  assert.equal(progress.at(-1).total, 16);
   assert.deepEqual(
     moneyhand.calls.filter((call) => call.method === "actSemanticRef").map((call) => call.input.action),
     ["type", "click", "check", "select", "upload", "download"],
@@ -135,6 +144,8 @@ test("automatic connect acceptance exercises the safe localhost browser checklis
     moneyhand.calls.filter((call) => call.method === "request").map((call) => call.input.params.method),
     ["downloads.removeFile", "downloads.erase"],
   );
+  assert.equal(moneyhand.calls.filter((call) => call.method === "navigateTaskTab").length, 3);
+  assert.equal(moneyhand.calls.filter((call) => call.method === "evaluateTaskTab").length, 3);
   const uploadRoot = moneyhand.calls.find((call) => call.method === "uploadRoot").path;
   await assert.rejects(access(uploadRoot));
 });

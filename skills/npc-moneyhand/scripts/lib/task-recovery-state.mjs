@@ -21,6 +21,42 @@ const SESSION_TERMINAL_CODES = new Set([
   "SESSION_REPLACED",
   "TASK_SESSION_UNHEALTHY",
 ]);
+const WAITING_CODES = new Set(["TAB_WAITING", "TASK_NEEDS_INSTRUCTION"]);
+
+function recoveryCategory(code) {
+  if (WAITING_CODES.has(code)) return "waiting-for-instruction";
+  if (code === "OUTCOME_UNKNOWN" || code.includes("OUTCOME_UNKNOWN")) return "outcome-unknown";
+  if (SESSION_TERMINAL_CODES.has(code)) return "connection";
+  if (REFRESH_TARGET_CODES.has(code) || code.includes("OCCLUDED")) return "target-state";
+  if (code === "RATE_CONTROL_CIRCUIT_OPEN" || /(?:RATE|THROTTL|HTTP_(?:403|429|503))/u.test(code)) {
+    return "rate-control";
+  }
+  if (code === "TASK_COMPLETION_GATE_FAILED") return "completion-gate";
+  if (code.includes("TIMEOUT") || code.includes("WAIT_TIMEOUT")) return "timeout";
+  if (code.includes("CLEANUP")) return "cleanup";
+  if (code.startsWith("TASK_EVALUATION_")) return "page-script";
+  if (code.startsWith("INVALID_") || code.endsWith("_REQUIRED")) return "invalid-request";
+  return "operation";
+}
+
+function rootCause(error, code) {
+  const cause = error?.details?.cause;
+  return {
+    code: typeof cause?.code === "string"
+      ? cause.code
+      : typeof error?.details?.causeCode === "string" ? error.details.causeCode : code,
+    message: String(cause?.message ?? error?.message ?? code).slice(0, 2_048),
+  };
+}
+
+function visualFallbackSummary(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    captured: value.captured === true,
+    path: typeof value.screenshot?.path === "string" ? value.screenshot.path : null,
+    waitingForInstruction: value.waitingForInstruction === true,
+  };
+}
 
 function dispatchState(error) {
   if (error?.details?.actionDispatched === true) return true;
@@ -40,16 +76,48 @@ export function planTaskRecovery(input = {}) {
     attempt,
     maximumAttempts: 2,
     actionDispatched,
+    category: recoveryCategory(code),
+    rootCause: rootCause(input.error, code),
+    retryAllowed: false,
+    retryAtMs: Number.isFinite(input.error?.details?.retryAtMs)
+      ? Math.max(0, input.error.details.retryAtMs)
+      : null,
+    waitingForInstruction: WAITING_CODES.has(code)
+      || typeof input.error?.details?.waitId === "string",
+    visualFallback: visualFallbackSummary(input.error?.details?.visualFallback),
     visualRequired: input.hasTaskPage !== false,
     replayAllowed: false,
     state: "inspect",
     nextAction: "inspect-current-page-then-decide",
   };
-  if (actionDispatched === true || actionDispatched === "unknown") {
+  if (base.waitingForInstruction) {
     return {
       ...base,
-      state: "outcome_unknown",
-      nextAction: "inspect-current-state-never-replay-blindly",
+      state: "needs_instruction",
+      nextAction: "resolve-task-blocker",
+    };
+  }
+  if (base.category === "completion-gate") {
+    return {
+      ...base,
+      state: "blocked",
+      nextAction: "inspect-completion-gate",
+    };
+  }
+  if (base.category === "rate-control") {
+    return {
+      ...base,
+      state: "blocked",
+      nextAction: base.retryAtMs === null
+        ? "preserve-checkpoint-and-wait-for-instruction"
+        : "wait-until-retry-at",
+    };
+  }
+  if (base.category === "page-script") {
+    return {
+      ...base,
+      state: "inspect",
+      nextAction: "inspect-current-page-and-fix-expression",
     };
   }
   if (SESSION_TERMINAL_CODES.has(code)) {
@@ -57,7 +125,16 @@ export function planTaskRecovery(input = {}) {
       ...base,
       state: "terminal",
       visualRequired: false,
-      nextAction: "end-task-and-run-fixed-connect-flow-once",
+      nextAction: actionDispatched === false
+        ? "end-task-and-run-fixed-connect-flow-once"
+        : "preserve-state-end-task-and-run-fixed-connect-flow-once",
+    };
+  }
+  if (actionDispatched === true || actionDispatched === "unknown") {
+    return {
+      ...base,
+      state: "outcome_unknown",
+      nextAction: "inspect-current-state-never-replay-blindly",
     };
   }
   if (REFRESH_TARGET_CODES.has(code)) {
@@ -72,6 +149,7 @@ export function planTaskRecovery(input = {}) {
       ...base,
       state: "probe",
       replayAllowed: true,
+      retryAllowed: true,
       nextAction: "probe-same-task-page-then-retry-once",
     };
   }
@@ -85,9 +163,25 @@ export function attachRecovery(error, recovery) {
     wrapped.details = { recovery };
     return wrapped;
   }
+  const details = error.details && typeof error.details === "object" ? error.details : {};
   error.details = {
-    ...(error.details && typeof error.details === "object" ? error.details : {}),
-    recovery,
+    ...details,
+    recovery: {
+      ...recovery,
+      waitingForInstruction: recovery.waitingForInstruction === true
+        || typeof details.waitId === "string"
+        || details.visualFallback?.waitingForInstruction === true,
+      visualFallback: visualFallbackSummary(details.visualFallback)
+        ?? recovery.visualFallback
+        ?? null,
+    },
   };
   return error;
+}
+
+export function ensureTaskRecovery(error, input = {}) {
+  const existing = error?.details?.recovery;
+  return attachRecovery(error, existing && typeof existing === "object"
+    ? existing
+    : planTaskRecovery({ ...input, error }));
 }

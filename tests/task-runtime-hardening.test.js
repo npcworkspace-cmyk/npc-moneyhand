@@ -106,6 +106,94 @@ test("task ledger marks an unterminated execution interrupted under another cont
   assert.equal(status.reattachable, false);
 });
 
+test("task ledger derives one compact status summary from progress, rate, visual, and recovery events", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "npc-moneyhand-ledger-summary-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let now = Date.parse("2026-08-21T01:00:00.000Z");
+  const ledger = await TaskExecutionLedger.create({
+    root,
+    controller,
+    taskPath: join(root, "task.mjs"),
+    now: () => now,
+  });
+  await ledger.append({
+    type: "event",
+    event: "moneyhand.task_progress",
+    state: "running",
+    phase: "collect",
+    current: 2,
+    total: 5,
+    checkpoint: "page:2",
+  });
+  now += 500;
+  await ledger.append({
+    type: "event",
+    event: "moneyhand.task_rate_control",
+    state: "allowed",
+    phase: "cooldown",
+    waitMs: 2_500,
+    stop: false,
+    checkpointRequired: false,
+  });
+  now += 500;
+  await ledger.append({
+    type: "event",
+    event: "moneyhand.task_progress",
+    state: "visual_fallback",
+    phase: "watchdog",
+    visualFallback: {
+      captured: true,
+      screenshot: { path: "C:\\evidence\\page-2.png" },
+    },
+  });
+  now += 2_000;
+  const running = await readTaskExecutionStatus({
+    root,
+    build,
+    controller,
+    taskExecutionId: ledger.taskExecutionId,
+    now: () => now,
+  });
+  assert.deepEqual(running.taskSummary, {
+    schema: "npc-moneyhand-task-summary/1",
+    state: "running",
+    phase: "watchdog",
+    progress: { current: 2, total: 5 },
+    lastCheckpoint: "page:2",
+    lastActivityAgoMs: 2_000,
+    rate: {
+      state: "allowed",
+      phase: "cooldown",
+      waitMs: 2_500,
+      stop: false,
+      checkpointRequired: false,
+    },
+    visual: {
+      captured: true,
+      path: "C:\\evidence\\page-2.png",
+      waitingForInstruction: false,
+    },
+    nextAction: "wait-for-rate-window",
+  });
+
+  now += 1_000;
+  await ledger.finish({
+    ok: true,
+    value: { status: "complete" },
+  });
+  const completed = await readTaskExecutionStatus({
+    root,
+    build,
+    controller,
+    taskExecutionId: ledger.taskExecutionId,
+    now: () => now,
+  });
+  assert.equal(completed.taskSummary.state, "completed");
+  assert.equal(completed.taskSummary.phase, "complete");
+  assert.equal(completed.taskSummary.nextAction, "none");
+  assert.equal(completed.taskSummary.lastActivityAgoMs, 0);
+});
+
 test("effect receipts collapse concurrent and later duplicates without hiding unknown outcomes", async () => {
   const events = [];
   const receipts = new TaskEffectReceipts({
@@ -200,6 +288,25 @@ test("fixed recovery permits only one proven-not-dispatched transient replay", (
   });
   assert.equal(stale.state, "refresh_target");
   assert.equal(stale.replayAllowed, false);
+  assert.equal(stale.category, "target-state");
+  assert.equal(stale.rootCause.code, "STALE_SEMANTIC_REF");
+  assert.equal(stale.retryAllowed, false);
+  assert.equal(stale.retryAtMs, null);
+  assert.equal(stale.waitingForInstruction, false);
+  assert.equal(stale.visualFallback, null);
+
+  const waiting = planTaskRecovery({
+    operation: "actSemanticRef",
+    error: {
+      code: "TAB_WAITING",
+      message: "The task tab is waiting for Agent instruction",
+      details: { actionDispatched: false, waitId: "wait-1" },
+    },
+    attempt: 1,
+  });
+  assert.equal(waiting.category, "waiting-for-instruction");
+  assert.equal(waiting.waitingForInstruction, true);
+  assert.equal(waiting.nextAction, "resolve-task-blocker");
 });
 
 test("completion gate uses latest receipts, rate circuits, cleanup, and declared requirements", () => {
@@ -314,6 +421,10 @@ test("task wrapper hard-codes idempotent effects and one bounded recovery retry"
   assert.equal(final.completionGate.passed, true);
   assert.equal(final.taskEvidence.counts.effects >= 3, true);
   assert.equal(final.taskEvidence.counts.recoveries >= 3, true);
+  assert.equal(final.taskSummary.schema, "npc-moneyhand-task-summary/1");
+  assert.equal(final.taskSummary.state, "completed");
+  assert.equal(final.taskSummary.phase, "complete");
+  assert.equal(final.taskSummary.nextAction, "none");
 });
 
 test("task wrapper pins semantic snapshots and normalizes whole-document hints", async (t) => {
@@ -509,11 +620,15 @@ test("task wrapper rejects an unsupported completion claim after cleanup", async
     }),
     (error) => error?.code === "TASK_COMPLETION_GATE_FAILED"
       && error.details?.completionGate?.passed === false
-      && error.details?.cleanupComplete === true,
+      && error.details?.cleanupComplete === true
+      && error.details?.recovery?.category === "completion-gate"
+      && error.details?.recovery?.nextAction === "inspect-completion-gate",
   );
   assert.equal(final.completionGate.enforced, true);
   assert.equal(final.completionGate.passed, false);
   assert.equal(final.taskEvidence.cleanup.ok, true);
+  assert.equal(final.taskSummary.state, "failed");
+  assert.equal(final.taskSummary.nextAction, "inspect-completion-gate");
 });
 
 test("isolated task worker termination releases task-owned resources and leaves unrelated resources alive", async (t) => {

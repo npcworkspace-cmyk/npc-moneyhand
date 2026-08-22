@@ -53,6 +53,30 @@ record is returned immediately; `state:"interrupted"` produces `TASK_EXECUTION_I
 restarts browser work. Journals contain bounded event/result metadata and a private evidence artifact,
 not an authorization to copy sensitive page content into shared logs.
 
+## Standard recovery envelope
+
+Every terminal task error preserves its original `code`, `message`, and details, and additionally
+contains `error.details.recovery` using schema `npc-moneyhand-task-recovery/1`. Read these stable fields
+before branching:
+
+```js
+{
+  category,
+  rootCause: { code, message },
+  actionDispatched,
+  retryAllowed,
+  retryAtMs,
+  waitingForInstruction,
+  visualFallback: { captured, path, waitingForInstruction },
+  nextAction
+}
+```
+
+This envelope is additive: the raw platform/CDP error remains available for diagnostics. Execute only
+`nextAction`. `retryAllowed:true` still means at most the one fixed, same-page proven-not-dispatched
+retry; it never overrides unknown-dispatch or rate-control rules. A null screenshot path means no
+image was captured, not permission to guess a tab or replay an action.
+
 ## Visual blocker recovery
 
 The task runtime captures one current-viewport PNG for visible-page timeouts, occlusion, stale or

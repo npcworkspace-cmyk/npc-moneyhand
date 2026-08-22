@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
-const CHECK_TOTAL = 15;
+const CHECK_TOTAL = 16;
 
 function normalizedError(error) {
   return {
@@ -106,26 +106,18 @@ function requireTerminal(terminal, label) {
 }
 
 async function evaluate(moneyhand, task, expression) {
-  const terminal = await moneyhand.taskRequest({
+  const evaluated = await moneyhand.evaluateTaskTab({
     taskSpaceId: task.taskSpaceId,
-    effect: "read-only",
-    request: {
-      method: "cdp.send",
-      params: {
-        target: { tabId: task.tabId },
-        method: "Runtime.evaluate",
-        params: { expression, returnByValue: true, awaitPromise: true },
-      },
-    },
+    tabId: task.tabId,
+    expression,
+    awaitPromise: true,
   });
-  const command = requireTerminal(terminal, "Runtime.evaluate");
-  const value = command?.result?.result?.value;
-  if (value === undefined) {
-    const error = new Error("Runtime.evaluate returned no serializable value");
+  if (evaluated?.hasValue !== true) {
+    const error = new Error("evaluateTaskTab returned no serializable value");
     error.code = "CONNECT_ACCEPTANCE_READ_FAILED";
     throw error;
   }
-  return value;
+  return evaluated.value;
 }
 
 async function chromeCall(moneyhand, task, method, args) {
@@ -306,7 +298,7 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     await pass(activeCheck, { deltaY: 700 });
 
     activeCheck = "bounded_cdp_read";
-    const state = await evaluate(moneyhand, task, `({
+    const state = await evaluate(moneyhand, task, `Promise.resolve({
       value:document.querySelector("#acceptance-text").value,
       output:document.querySelector("#acceptance-output").value,
       checked:document.querySelector("#acceptance-check").checked,
@@ -363,6 +355,40 @@ export async function run({ moneyhand, signal, args = {}, progress }) {
     await chromeCall(moneyhand, task, "downloads.erase", [{ id: downloadId }]);
     downloadId = undefined;
     await pass(activeCheck, { fileRemoved: true, historyRemoved: true });
+
+    activeCheck = "multi_navigation_evaluate";
+    const currentDocuments = [];
+    for (const documentNumber of [2, 3]) {
+      const documentUrl = `${fixtureUrl}?document=${documentNumber}`;
+      const moved = await moneyhand.navigateTaskTab({
+        taskSpaceId: task.taskSpaceId,
+        tabId: task.tabId,
+        url: documentUrl,
+        expectedUrl: documentUrl,
+        urlMatch: "exact",
+        waitUntil: "domcontentloaded",
+        timeoutMs: 10_000,
+        signal,
+      });
+      if (moved.loaded !== true) {
+        throw Object.assign(new Error(`Document ${documentNumber} was not proven loaded`), {
+          code: "CONNECT_ACCEPTANCE_MULTI_NAVIGATION_FAILED",
+        });
+      }
+      const current = await evaluate(moneyhand, task, `Promise.resolve({
+        href:location.href,
+        title:document.title,
+        fixture:document.body.innerText.includes(${JSON.stringify(token)})
+      })`);
+      if (current.href !== documentUrl || current.title !== "MoneyHand automatic acceptance"
+        || current.fixture !== true) {
+        throw Object.assign(new Error(`Document ${documentNumber} evaluation used a stale page context`), {
+          code: "CONNECT_ACCEPTANCE_STALE_EVALUATION_CONTEXT",
+        });
+      }
+      currentDocuments.push(documentNumber);
+    }
+    await pass(activeCheck, { currentDocuments, cachedContextIdentifiers: false });
 
     evidence.push({
       type: "automatic-browser-acceptance",

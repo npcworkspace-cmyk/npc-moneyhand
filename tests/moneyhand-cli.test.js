@@ -700,12 +700,18 @@ test("CLI task survives client loss and a fresh Agent follows its private journa
   assert.equal((await waitForClose(followChild, 8_000))[0], 0, followError);
   const status = followMessages.find((message) => message.event === "moneyhand.task_status");
   assert.equal(status.status.state, "running");
+  assert.equal(status.taskSummary.schema, "npc-moneyhand-task-summary/1");
+  assert.equal(status.taskSummary.state, "running");
+  assert.deepEqual(status.taskSummary, status.status.taskSummary);
+  assert.equal(status.taskSummary.nextAction, "continue-task-follow");
   const terminal = followMessages.find((message) => message.type === "result" && message.id === "task");
   assert.equal(terminal.ok, true);
   assert.equal(terminal.reattached, true);
   assert.equal(terminal.value.terminal.result.targets[0].tabId, 501);
   assert.equal(terminal.completionGate.passed, true);
   assert.equal(terminal.taskEvidence.artifact.private, true);
+  assert.equal(terminal.taskSummary.state, "completed");
+  assert.equal(terminal.taskSummary.nextAction, "none");
 
   const queried = await runCli([
     "--task-status",
@@ -717,6 +723,8 @@ test("CLI task survives client loss and a fresh Agent follows its private journa
   const queriedStatus = queried.messages.find((message) => message.id === "task-status").value;
   assert.equal(queriedStatus.state, "completed");
   assert.equal(queriedStatus.terminal.ok, true);
+  assert.equal(queriedStatus.taskSummary.state, "completed");
+  assert.equal(queriedStatus.taskSummary.nextAction, "none");
 });
 
 test("CLI exits nonzero when a task result is ok false", async (t) => {
@@ -764,6 +772,12 @@ test("CLI exits nonzero when a task result is ok false", async (t) => {
   const result = messages.find((message) => message.id === "task");
   assert.equal(result.ok, false);
   assert.equal(result.error.message, "task exploded");
+  assert.equal(result.error.details.recovery.schema, "npc-moneyhand-task-recovery/1");
+  assert.equal(result.error.details.recovery.rootCause.message, "task exploded");
+  assert.equal(typeof result.error.details.recovery.nextAction, "string");
+  assert.equal(result.taskSummary.schema, "npc-moneyhand-task-summary/1");
+  assert.equal(result.taskSummary.state, "failed");
+  assert.equal(result.taskSummary.nextAction, result.error.details.recovery.nextAction);
   opened.client.destroy();
 });
 

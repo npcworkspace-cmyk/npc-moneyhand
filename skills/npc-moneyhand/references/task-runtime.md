@@ -44,6 +44,11 @@ node scripts/moneyhand.mjs --task-follow "TASK_EXECUTION_ID"
 Use `--task-last` once only if the ID itself was lost. These commands read the private journal and do
 not connect the Extension or open a browser. `state:"interrupted"` is not success.
 
+Read compact `taskSummary` first on a terminal, status, or initial follow record. Its bounded fields
+are `state`, `phase`, `progress:{current,total}`, `lastCheckpoint`, `lastActivityAgoMs`, `rate`,
+`visual`, and `nextAction`. Follow only `nextAction`; initial follow exposes the same object at top
+level and as `status.taskSummary`.
+
 ## Copyable operation shapes
 
 Navigate with `domcontentloaded` for ordinary dynamic pages. The task runtime injects its fixed
@@ -81,31 +86,24 @@ In task modules, omit snapshot `selector`: it selects a browser session, never C
 
 When a link has `href`, prefer `navigateSemanticRef({taskSpaceId,snapshotId,ref,signal})` over an occludable click.
 
-For a bounded DOM read, `taskRequest.request.method` is `cdp.send`; the CDP method is nested in
-`params`. Never put `Runtime.evaluate` directly in `request.method`:
+For a bounded read of the current document, use `evaluateTaskTab()`. It selects the current default
+page context on every call, awaits Promises by default, returns values by copy, and never accepts a
+cached `contextId`, `executionContextId`, or `objectId`:
 
 ```js
-const terminal = await moneyhand.taskRequest({
-  taskSpaceId: task.taskSpaceId, effect: "read-only", signal,
-  request: {
-    method: "cdp.send",
-    params: {
-      target: { tabId: task.tabId }, method: "Runtime.evaluate",
-      params: {
-        expression: `(() => [...document.querySelectorAll("[data-example-record]")]
-          .slice(0, 20).map((element) => element.innerText).filter(Boolean))()`,
-        returnByValue: true,
-      },
-    },
-  },
+const evaluated = await moneyhand.evaluateTaskTab({
+  taskSpaceId: task.taskSpaceId, tabId: task.tabId, signal,
+  expression: `Promise.resolve([...document.querySelectorAll("[data-example-record]")]
+    .slice(0, 20).map((element) => element.innerText).filter(Boolean))`,
 });
-if (!terminal.ok) throw new Error(terminal.error?.code ?? "DOM_READ_FAILED");
-const records = terminal.result?.result?.result?.value;
+const records = evaluated.value;
 if (!Array.isArray(records)) throw new Error("DOM_READ_RESULT_INVALID");
 ```
 
-Keep expressions local, bounded, read-only, and independent of page-supplied executable text. Human
-mode does not make JavaScript human-like. Use `scrollTaskTab()` for input-path scrolling.
+`undefined` returns `isUndefined:true`; page exceptions use `TASK_EVALUATION_EXCEPTION`. Call the same
+helper after every navigation—never cache an execution context. Expressions stay local, bounded,
+read-only, and independent of page text. Raw CDP remains in `browser-workflows.md`; human mode does
+not make JavaScript human-like. Use `scrollTaskTab()` for input-path scrolling.
 
 ```js
 await moneyhand.scrollTaskTab({
@@ -180,6 +178,8 @@ outcome = {
 The terminal result adds `taskEvidence` and `completionGate`. A complete claim fails as
 `TASK_COMPLETION_GATE_FAILED` while cleanup, effects, rate state, instruction state, or requirements
 remain unresolved. Private controller evidence does not replace a specialized Skill's domain output.
+Every terminal error keeps its original fields and adds `error.details.recovery`; follow its
+`nextAction` instead of inferring another retry policy from the raw message.
 
 Read another reference only when the task reaches that branch:
 

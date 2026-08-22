@@ -158,7 +158,7 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.automaticConnection?.runsBrowserOperation !== true
   || contract.automaticConnection?.automaticAcceptance?.mandatoryOnNormalConnect !== true
   || contract.automaticConnection?.automaticAcceptance?.scope !== "localhost-owned-task-window"
-  || contract.automaticConnection?.automaticAcceptance?.checks?.length !== 15
+  || contract.automaticConnection?.automaticAcceptance?.checks?.length !== 16
   || contract.automaticConnection?.automaticAcceptance?.closesTaskWindow !== true
   || contract.automaticConnection?.automaticAcceptance?.resetsBehaviorToRaw !== true
   || contract.automaticConnection?.automaticAcceptance?.removesDownloadArtifact !== true
@@ -194,6 +194,7 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
     "navigateSemanticRef",
     "captureStableViewport",
     "captureFullPage",
+    "evaluateTaskTab",
     "inspectTaskBlocker",
     "resolveTaskBlocker",
     "completeTaskContext",
@@ -217,6 +218,11 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.progress?.watchdogPollMaximumMs !== 250
   || contract.taskRuntime?.progress?.streamsBeforeTaskCompletion !== true
   || contract.taskRuntime?.progress?.screenshotOnSilence !== true
+  || contract.taskRuntime?.currentDocumentEvaluation?.operation !== "evaluateTaskTab"
+  || contract.taskRuntime?.currentDocumentEvaluation?.cachedContextIdentifiersAllowed !== false
+  || contract.taskRuntime?.statusSummary?.schema !== "npc-moneyhand-task-summary/1"
+  || contract.taskRuntime?.recoveryEnvelope?.schema !== "npc-moneyhand-task-recovery/1"
+  || !contract.transports?.taskModule?.terminalEvidenceFields?.includes("taskSummary")
   || contract.transports?.taskModule?.flag !== "--task"
   || contract.transports?.taskModule?.signature
     !== "run({ moneyhand, signal, args, progress, taskExecutionId })"

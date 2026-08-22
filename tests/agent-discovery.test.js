@@ -110,7 +110,7 @@ function assertDescriptor(descriptor, contract, catalog) {
   assert.equal(contract.automaticConnection.runsBrowserOperation, true);
   assert.equal(contract.automaticConnection.automaticAcceptance.mandatoryOnNormalConnect, true);
   assert.equal(contract.automaticConnection.automaticAcceptance.scope, "localhost-owned-task-window");
-  assert.equal(contract.automaticConnection.automaticAcceptance.checks.length, 15);
+  assert.equal(contract.automaticConnection.automaticAcceptance.checks.length, 16);
   assert.equal(contract.automaticConnection.automaticAcceptance.closesTaskWindow, true);
   assert.equal(contract.automaticConnection.automaticAcceptance.resetsBehaviorToRaw, true);
   assert.equal(contract.automaticConnection.automaticAcceptance.removesDownloadArtifact, true);

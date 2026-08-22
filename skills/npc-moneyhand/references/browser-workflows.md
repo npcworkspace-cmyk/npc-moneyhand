@@ -13,6 +13,7 @@ downloads/uploads/select/check actions, or converting screenshots to safe input 
 
 - [Acquisition order and rate control](#acquisition-order-and-rate-control)
 - [Page transitions](#page-transitions)
+- [Current-document evaluation and raw CDP](#current-document-evaluation-and-raw-cdp)
 - [Semantic snapshots and locators](#semantic-snapshots-and-locators)
 - [Semantic actions](#semantic-actions)
 - [Downloads and uploads](#downloads-and-uploads)
@@ -74,6 +75,39 @@ effect. Consider a corrected retry only when the error explicitly reports `actio
 For scrolling, prefer `scrollTaskTab()`. It infers the pinned page and viewport center, then
 dispatches through `input.perform`; this is the normal path where human scroll pacing applies. Page
 JavaScript such as `window.scrollBy()` is not human input.
+
+## Current-document evaluation and raw CDP
+
+Use `evaluateTaskTab({taskSpaceId,tabId,expression,signal})` for read-only DOM/JavaScript extraction.
+Each call deliberately omits CDP execution-context identifiers and evaluates in the current default
+page context, so the same helper remains valid after every navigation. It always uses
+`returnByValue:true`, awaits Promises unless `awaitPromise:false` is explicit, and returns the stable
+`npc-moneyhand-task-evaluate/1` envelope. Do not cache RemoteObjects or pass page-derived executable
+text into the expression.
+
+Use raw CDP only when this bounded helper cannot express the required read. The Task request method is
+`cdp.send`; the CDP method is nested under `request.params`:
+
+```js
+const terminal = await moneyhand.taskRequest({
+  taskSpaceId: task.taskSpaceId,
+  effect: "read-only",
+  signal,
+  request: {
+    method: "cdp.send",
+    params: {
+      target: { tabId: task.tabId },
+      method: "Runtime.evaluate",
+      params: { expression: "document.title", returnByValue: true },
+    },
+  },
+});
+if (!terminal.ok) throw new Error(terminal.error?.code ?? "CDP_READ_FAILED");
+```
+
+Raw CDP keeps its native nested result and error envelope. It does not receive the helper's current-
+document normalization; callers that choose it own bounded decoding and must still avoid cached
+`contextId`/`objectId` reuse across navigation.
 
 ## Semantic snapshots and locators
 

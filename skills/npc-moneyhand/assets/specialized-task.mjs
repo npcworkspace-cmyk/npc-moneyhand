@@ -61,6 +61,8 @@ export async function run({ moneyhand, signal, args = {}, progress, taskExecutio
     // selector is a browser-session object, never CSS. Type uses text; select uses options.
     // Navigation helpers inject effect "navigation" and scrollTaskTab injects "input";
     // provide stable effectId values but do not override those fixed effects.
+    // Use evaluateTaskTab for bounded read-only current-document extraction after any navigation;
+    // never carry contextId/objectId between documents.
     // Use stable effectId values for replay-sensitive calls and return explicit
     // {id,satisfied,expected,actual} requirements before claiming complete.
     outcome = {

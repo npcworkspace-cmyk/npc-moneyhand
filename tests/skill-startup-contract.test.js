@@ -86,9 +86,10 @@ test("base Skill keeps specialized workflow ownership outside MoneyHand", async 
 });
 
 test("normal task docs stay concise while exposing copyable operation shapes", async () => {
-  const [runtime, recovery] = await Promise.all([
+  const [runtime, recovery, workflows] = await Promise.all([
     readFile("skills/npc-moneyhand/references/task-runtime.md", "utf8"),
     readFile("skills/npc-moneyhand/references/task-recovery.md", "utf8"),
+    readFile("skills/npc-moneyhand/references/browser-workflows.md", "utf8"),
   ]);
   assert.ok(runtime.trimEnd().split(/\r?\n/u).length <= 190, "normal task path is too dense");
   assert.match(runtime, /assets\/disposable-task\.mjs/u);
@@ -99,10 +100,11 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(recovery, /about:blank#npc-moneyhand-bootstrap=<uuid>/u);
   assert.match(recovery, /TASK_WINDOW_OWNERSHIP_CHANGED/u);
   assert.match(recovery, /unknown creation outcome without an acknowledged[\s\S]*ID is never removed/u);
-  assert.match(runtime, /taskRequest\.request\.method.*`cdp\.send`/u);
-  assert.match(runtime, /method: "cdp\.send",[\s\S]*method: "Runtime\.evaluate"/u);
-  assert.match(runtime, /terminal\.result\?\.result\?\.result\?\.value/u);
-  assert.match(runtime, /Never put `Runtime\.evaluate` directly in `request\.method`/u);
+  assert.match(runtime, /evaluateTaskTab/u);
+  assert.match(runtime, /cached `contextId`, `executionContextId`, or `objectId`/u);
+  assert.match(runtime, /`isUndefined:true`/u);
+  assert.match(workflows, /method: "cdp\.send",[\s\S]*method: "Runtime\.evaluate"/u);
+  assert.match(workflows, /Raw CDP keeps its native nested result/u);
   assert.match(runtime, /--task "ABSOLUTE_PATH_TO_TASK_MODULE\.mjs"/u);
   assert.match(runtime, /Deduplicate by canonical identifier/u);
   for (const text of [runtime, await readFile(SKILL_PATH, "utf8")]) {
