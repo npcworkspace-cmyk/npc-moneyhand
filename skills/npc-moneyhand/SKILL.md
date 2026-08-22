@@ -114,16 +114,18 @@ stop instead of inventing an alternative installation.
 
 Read `references/task-runtime.md` before writing or running task logic. It is the short, single normal
 task path and contains copyable argument shapes. Do not preload recovery or full API references.
-Never run `assets/disposable-task.mjs`, `assets/specialized-task.mjs`, or an unchanged copy. Copy the
-appropriate template to a task-owned temporary path and replace only its `executeTask()` function;
-preserve the fixed `run()` lifecycle. There is no sentinel or authoring flag to edit: the controller
-rejects a normalized source-identical template as `TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch.
+Never run `assets/disposable-task.mjs`, `assets/specialized-task.mjs`, or an unchanged copy. They are
+blank lifecycle templates: copy one to a task-owned temporary path, replace only `executeTask()`, and
+preserve `run()`. The controller rejects only those source-identical blank assets as
+`TASK_TEMPLATE_NOT_IMPLEMENTED` before browser dispatch.
 Write non-empty task arguments to an absolute UTF-8 JSON file and invoke `--args-file`; never hand-escape
 inline JSON in a shell command.
-For a first multi-page or file-producing task, follow the complete platform-neutral
-`references/bounded-file-task.example.mjs` pattern instead of inventing an output loop. For every
-page-side DOM read, use the template's `pageExpression(pageFunction,input)` helper; never hand-build an
-`expression` template string. When output records must preserve page order, copy
+For a first multi-page or file-producing task, copy the runnable platform-neutral
+`references/bounded-file-task.example.mjs`. If its generic record selector fits, leave its source intact
+and put only user-supplied or authoritative task-input expectations in `args.acceptance`; omit every
+unknown value. In particular, never infer a `pageIds` value from a page key, URL, title, or example.
+This complete reference is allowed unchanged. Otherwise adapt only its extractor and acceptance. For every page-side DOM read, use
+`pageExpression(pageFunction,input)`; never hand-build an expression string. For ordered output, use
 `recordGroupOrderRequirement(records,expectedPageKeys)` instead of expanding page IDs from a guessed per-page count.
 MoneyHand selects the latest focused connected Profile once, opens one dedicated task window in
 that Profile, pins it under a generated `taskId`, and closes that exact window in cleanup. The Agent
@@ -194,7 +196,7 @@ never the bulk-data payload. Use the template's `stableEffectId(prefix,key)` for
 canonical keys instead of hand-building effect IDs.
 Before claiming `complete`, map every explicit user acceptance condition to a separate requirement;
 record count, page count, order, required IDs, and required field values must never share one generic check.
-Collect every bounded matching row; never invent an exact per-page count or field assertion the user omitted.
+Collect every bounded matching row; never invent a per-page count, page ID, or field assertion the user omitted.
 For file output, `output.path/count` and `output-file` evidence must describe the same file and count.
 
 Run every `--task` as one foreground-attached command and keep consuming its stdout until the terminal

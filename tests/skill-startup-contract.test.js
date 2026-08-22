@@ -132,6 +132,10 @@ test("normal task docs stay concise while exposing copyable operation shapes", a
   assert.match(runtime, /Map every explicit user acceptance[\s\S]*its own machine-checkable requirement/u);
   assert.match(runtime, /never merge record count, page count, order,[\s\S]*required field values/u);
   assert.match(runtime, /one-page-to-many-records[\s\S]*never\s+invent a per-page cardinality/u);
+  assert.match(runtime, /`acceptance` is an allowlist of explicit facts/u);
+  assert.match(runtime, /Never infer `pageIds` from a page key, URL, title, or this example/u);
+  assert.match(runtime, /Otherwise omit `pageIds`/u);
+  assert.doesNotMatch(runtime, /"pageIds":\{"alpha":"page-alpha"\}/u);
 });
 
 test("normal task docs expose timeout cleanup and non-ambiguous screenshot terminals", async () => {

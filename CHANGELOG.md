@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2] - 2026-08-22
+
+- Treat the complete bounded-file reference as a runnable parameterized task instead of rejecting a valid source-identical copy as an unimplemented template.
+- Keep normalized-source rejection for the genuinely blank disposable and specialized lifecycle assets.
+- Add fail-closed `args.acceptance` checks for total records, per-page counts, page IDs, and every required field so a copied reference can prove the user's exact result without fragile source edits.
+- Make acceptance provenance explicit: Agents omit unknown expected values instead of inventing page IDs, and connection results expose the exact product version and task-routing rule.
+
 ## [1.2.1] - 2026-08-22
 
 - Detect unchanged authoring templates by normalized source fingerprint, so Agents edit only `executeTask()` and never remove a sentinel or authoring flag manually.

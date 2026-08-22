@@ -5,19 +5,32 @@ guess browser IDs, start another controller, or rewrite lifecycle code from memo
 
 ## Fixed authoring route
 
-1. Copy `assets/disposable-task.mjs` to a task-owned absolute path.
-2. Replace only `executeTask()`; there is no sentinel or flag. A normalized source-identical template is rejected; preserve `run()` and cleanup.
+1. For a custom task, copy `assets/disposable-task.mjs` and replace only `executeTask()`; there is no sentinel or flag, and a normalized source-identical template is rejected when it is a blank asset.
+2. For generic multi-page records, copy the runnable `references/bounded-file-task.example.mjs`; it may remain source-identical when its selectors fit.
 3. Write task arguments to one absolute UTF-8 JSON file and use `--args-file`; never inline non-empty JSON in a shell command.
 4. Use the injected `task.taskSpaceId` and `task.tabId`; later browser focus never retargets the task.
 5. Default to `behavior:"raw"`; pass `args.behavior:"human"` only for genuinely human-style input.
 6. Call `progress({phase,message,current,total,checkpoint})` after every bounded batch or checkpoint.
 7. Return exactly `{outcome,output?}` from `executeTask()`. Map every explicit user acceptance
    condition to its own machine-checkable requirement; never merge record count, page count, order,
-   required IDs, or required field values into one generic check. Wrapper cleanup failure downgrades completion.
+   required IDs, or required field values into one generic check. Omit unknown expectations; never guess them.
+   Wrapper cleanup failure downgrades completion.
 
-For the first multi-page or file-producing task, copy the full pattern from
-`references/bounded-file-task.example.mjs`; adapt its extractor and conditions. It is one-page-to-many-records:
-collect every bounded match and never invent a per-page cardinality. For record order, copy
+The runnable reference is one-page-to-many-records. `acceptance` is an allowlist of explicit facts,
+not a checklist to fill. Never infer `pageIds` from a page key, URL, title, or this example:
+
+```json
+{"pages":[{"id":"alpha","url":"https://example.test/alpha"}],
+ "outputPath":"ABSOLUTE_OUTPUT.jsonl","manifestPath":"ABSOLUTE_MANIFEST.json",
+ "checkpointPath":"ABSOLUTE_CHECKPOINT.json","behavior":"raw",
+ "acceptance":{"recordCount":2,"recordsByPage":{"alpha":2},
+ "requiredFields":["id","pageKey","text","url"]}}
+```
+
+If the user explicitly says gamma's page ID must equal `literal-${POST_ID}`, add only
+`"pageIds":{"gamma":"literal-${POST_ID}"}`. Otherwise omit `pageIds`. Unknown acceptance keys fail closed.
+Each supplied count, page ID, and field becomes its own completion-gate requirement. Adapt the extractor only when the generic `[data-record], .record-card` selector or fields
+do not fit. Collect every bounded match; never invent a per-page cardinality. Keep page order with
 `recordGroupOrderRequirement(records, expectedPageKeys)`; never expand IDs using assumed per-page counts.
 
 Run from the Skill root with an absolute task path:
@@ -52,21 +65,6 @@ open a browser. `state:"interrupted"` is not success.
 - Evidence proves completion. It contains bounded paths, counts, canonical IDs, hashes, or verified
   screenshots; it must not be used as the bulk-data payload. When `output` declares `path` and `count`,
   completion requires matching `output-file` evidence with the same path, format, and count.
-
-```js
-return {
-  outcome: {
-    status: "complete",
-    requirements: [
-      { id: "requested-record-count", satisfied: count === args.limit, expected: args.limit, actual: count },
-      { id: "requested-page-count", satisfied: pagesSeen === args.pages.length, expected: args.pages.length, actual: pagesSeen },
-      { id: "required-identifiers", satisfied: requiredIds.every((id) => seenIds.has(id)), expected: requiredIds.join("\n"), actual: [...seenIds].join("\n") },
-    ],
-    evidence: [{ type: "output-file", path: outputPath, format: "jsonl", count }],
-  },
-  output: { path: outputPath, format: "jsonl", count, checkpointPath },
-};
-```
 
 Read `taskSummary` first on terminal/status/follow surfaces and execute only its `nextAction`, but then
 read `value.output` when the user requested task data or an artifact. Do not mistake a completed

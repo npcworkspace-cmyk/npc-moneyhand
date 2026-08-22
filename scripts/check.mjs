@@ -18,8 +18,8 @@ const packageJson = readJson("package.json");
 const manifest = readJson("extension/manifest.json");
 
 if (packageJson.name !== "npc-moneyhand") fail("package name must be npc-moneyhand");
-if (packageJson.version !== "1.2.1") {
-  fail("package version must be 1.2.1");
+if (packageJson.version !== "1.2.2") {
+  fail("package version must be 1.2.2");
 }
 if (packageJson.dependencies || packageJson.devDependencies || packageJson.optionalDependencies) {
   fail("npc-moneyhand must not declare external dependencies");
@@ -29,7 +29,7 @@ if (existsSync(join(root, "package-lock.json"))) {
 }
 
 if (manifest.name !== "npc-moneyhand") fail("extension name must be npc-moneyhand");
-if (manifest.version !== "1.2.1") fail("extension version must be 1.2.1");
+if (manifest.version !== "1.2.2") fail("extension version must be 1.2.2");
 if (manifest.version_name !== packageJson.version) {
   fail("manifest version_name must match package version");
 }
@@ -154,6 +154,14 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.automaticConnection?.command !== "--connect"
   || contract.automaticConnection?.resultSchema !== "npc-moneyhand-connect/1"
   || contract.automaticConnection?.successNextAction !== "ready_for_tasks"
+  || JSON.stringify(contract.automaticConnection?.successTaskRouting) !== JSON.stringify({
+    currentConversationHasTask: "continue_immediately_without_reconfirmation",
+    noConcreteTask: "ask_user_for_task",
+    stopAfterConnectWhenTaskExists: "invalid",
+    blankTaskAssets: "copy_and_implement_never_run_source_identical_blank_asset",
+    runnableReference: "copy_source_identical_when_generic_selectors_fit",
+    acceptance: "explicit_user_or_authoritative_task_input_only_never_infer_unknown_values",
+  })
   || contract.automaticConnection?.userRetryFlag !== "--after-user-action"
   || contract.automaticConnection?.maximumUserConfirmedRetries !== 1
   || contract.automaticConnection?.runsBrowserOperation !== true
@@ -188,8 +196,14 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.taskRuntime?.authoring?.onlyEditableFunction !== "executeTask"
   || contract.taskRuntime?.authoring?.fixedLifecycleMustBePreserved !== true
   || contract.taskRuntime?.authoring?.unchangedTemplateDetection
-    !== "normalized-source-fingerprint"
+    !== "normalized-source-fingerprint-for-blank-assets"
   || contract.taskRuntime?.authoring?.manualSentinelRemovalRequired !== false
+  || contract.taskRuntime?.authoring?.runnableCompleteExampleAllowed !== true
+  || JSON.stringify(contract.taskRuntime?.authoring?.completeExampleAcceptanceArgs)
+    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields"])
+  || contract.taskRuntime?.authoring?.acceptanceAssertionSource
+    !== "explicit-user-or-authoritative-task-input-only"
+  || contract.taskRuntime?.authoring?.unknownAcceptanceValues !== "omit-never-guess"
   || contract.taskRuntime?.authoring?.taskArgsInput
     !== "absolute-utf8-json-file-via---args-file"
   || contract.taskRuntime?.authoring?.executeTaskReturn !== "{outcome,output?}"
@@ -265,8 +279,14 @@ if ((contract.controlProtocol ?? contract.protocol) !== "npc-moneyhand-control/1
   || contract.transports?.taskModule?.authoring?.onlyEditableFunction !== "executeTask"
   || contract.transports?.taskModule?.authoring?.fixedLifecycleMustBePreserved !== true
   || contract.transports?.taskModule?.authoring?.unchangedTemplateDetection
-    !== "normalized-source-fingerprint"
+    !== "normalized-source-fingerprint-for-blank-assets"
   || contract.transports?.taskModule?.authoring?.manualSentinelRemovalRequired !== false
+  || contract.transports?.taskModule?.authoring?.runnableCompleteExampleAllowed !== true
+  || JSON.stringify(contract.transports?.taskModule?.authoring?.completeExampleAcceptanceArgs)
+    !== JSON.stringify(["recordCount", "recordsByPage", "pageIds", "requiredFields"])
+  || contract.transports?.taskModule?.authoring?.acceptanceAssertionSource
+    !== "explicit-user-or-authoritative-task-input-only"
+  || contract.transports?.taskModule?.authoring?.unknownAcceptanceValues !== "omit-never-guess"
   || contract.transports?.taskModule?.authoring?.taskArgsInput
     !== "absolute-utf8-json-file-via---args-file"
   || contract.transports?.taskModule?.authoring?.pageExpressionHelper

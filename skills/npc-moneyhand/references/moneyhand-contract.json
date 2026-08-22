@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "npc-moneyhand",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "controlProtocol": "npc-moneyhand-control/1",
   "wireProtocol": "npc-moneyhand/2",
   "runtime": {
@@ -21,7 +21,9 @@
       "currentConversationHasTask": "continue_immediately_without_reconfirmation",
       "noConcreteTask": "ask_user_for_task",
       "stopAfterConnectWhenTaskExists": "invalid",
-      "taskModule": "copy_and_implement_never_run_packaged_template"
+      "blankTaskAssets": "copy_and_implement_never_run_source_identical_blank_asset",
+      "runnableReference": "copy_source_identical_when_generic_selectors_fit",
+      "acceptance": "explicit_user_or_authoritative_task_input_only_never_infer_unknown_values"
     },
     "userRetryFlag": "--after-user-action",
     "maximumUserConfirmedRetries": 1,
@@ -564,8 +566,17 @@
       "template": "assets/disposable-task.mjs",
       "onlyEditableFunction": "executeTask",
       "fixedLifecycleMustBePreserved": true,
-      "unchangedTemplateDetection": "normalized-source-fingerprint",
+      "unchangedTemplateDetection": "normalized-source-fingerprint-for-blank-assets",
       "manualSentinelRemovalRequired": false,
+      "runnableCompleteExampleAllowed": true,
+      "completeExampleAcceptanceArgs": [
+        "recordCount",
+        "recordsByPage",
+        "pageIds",
+        "requiredFields"
+      ],
+      "acceptanceAssertionSource": "explicit-user-or-authoritative-task-input-only",
+      "unknownAcceptanceValues": "omit-never-guess",
       "taskArgsInput": "absolute-utf8-json-file-via---args-file",
       "executeTaskReturn": "{outcome,output?}",
       "terminalValueField": "value",
@@ -873,8 +884,17 @@
         "template": "assets/disposable-task.mjs",
         "onlyEditableFunction": "executeTask",
         "fixedLifecycleMustBePreserved": true,
-        "unchangedTemplateDetection": "normalized-source-fingerprint",
+        "unchangedTemplateDetection": "normalized-source-fingerprint-for-blank-assets",
         "manualSentinelRemovalRequired": false,
+        "runnableCompleteExampleAllowed": true,
+        "completeExampleAcceptanceArgs": [
+          "recordCount",
+          "recordsByPage",
+          "pageIds",
+          "requiredFields"
+        ],
+        "acceptanceAssertionSource": "explicit-user-or-authoritative-task-input-only",
+        "unknownAcceptanceValues": "omit-never-guess",
         "taskArgsInput": "absolute-utf8-json-file-via---args-file",
         "executeTaskReturn": "{outcome,output?}",
         "bulkOutput": "user-authorized-file-plus-small-manifest",
@@ -923,7 +943,7 @@
     "builtInController": {
       "protocol": "npc-moneyhand-controller/2",
       "product": "npc-moneyhand",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "endpoint": "127.0.0.1:19845",
       "startup": "implicit-on-connect-call-or-task",
       "installation": "bundled-in-the-skill-no-separate-software",

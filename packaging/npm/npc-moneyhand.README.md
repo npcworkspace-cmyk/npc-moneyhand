@@ -12,7 +12,7 @@ extension remains the thin execution hand.
 ## Install a release tarball
 
 ```text
-npm install --ignore-scripts ./npc-moneyhand-1.2.1.tgz
+npm install --ignore-scripts ./npc-moneyhand-1.2.2.tgz
 ```
 
 For a project-local install, use `npm exec` so no global `PATH` setup is required. Installation is

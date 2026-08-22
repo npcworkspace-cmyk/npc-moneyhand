@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { join, parse, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
@@ -92,7 +92,7 @@ test("runMoneyHandTask rejects unchanged packaged authoring files before browser
     { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "native" },
     { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "lf" },
     { path: "../skills/npc-moneyhand/assets/disposable-task.mjs", endings: "crlf" },
-    { path: "../skills/npc-moneyhand/references/bounded-file-task.example.mjs", endings: "native" },
+    { path: "../skills/npc-moneyhand/assets/specialized-task.mjs", endings: "native" },
   ].entries()) {
     const taskPath = join(directory, `task-${index}.mjs`);
     let source = await readFile(new URL(fixture.path, import.meta.url), "utf8");
@@ -115,6 +115,37 @@ test("runMoneyHandTask rejects unchanged packaged authoring files before browser
   }
   assert.equal(browserRequests, 0);
   assert.equal(visualInspections, 0);
+});
+
+test("runMoneyHandTask allows the unchanged runnable bounded-file reference", async () => {
+  let taskContexts = 0;
+  const value = await runMoneyHandTask({
+    moneyhand: {
+      async request() {},
+      async beginTaskContext() {
+        taskContexts += 1;
+        return {
+          taskSpaceId: "runnable-reference-space",
+          tabId: 71,
+          page: { tabId: 71, url: "about:blank" },
+          behavior: { mode: "raw" },
+        };
+      },
+      async inspectTaskBlocker() {
+        return { captured: false, screenshot: { captured: false }, actionReplayed: false };
+      },
+      async completeTaskContext() {
+        return { cleanupComplete: true, behaviorReset: { ok: true } };
+      },
+      ownedTaskWindowIds() { return []; },
+      async cleanupOwnedTaskWindows() { return { ok: true, attempted: 0, results: [] }; },
+    },
+    taskPath: resolve("skills/npc-moneyhand/references/bounded-file-task.example.mjs"),
+    args: {},
+  });
+  assert.equal(taskContexts, 1);
+  assert.equal(value.outcome.status, "incomplete");
+  assert.equal(value.outcome.error.code, "INVALID_TASK_ARGS");
 });
 
 test("runMoneyHandTask accepts an implemented legacy copy without manual sentinel removal", async (t) => {

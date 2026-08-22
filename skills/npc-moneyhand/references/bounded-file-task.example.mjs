@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 
-// Complete platform-neutral example. Copy this file to a task-owned path and adapt
-// collectPage() plus the explicit user acceptance requirements. An unchanged copy is rejected.
+// Runnable platform-neutral reference task. Copy it to a task-owned path. When the generic
+// selectors fit, keep the source unchanged. In args.acceptance, declare only expectations explicitly
+// supplied by the user or authoritative task input; omit unknown values instead of guessing them.
+// Otherwise adapt collectPage() while preserving the fixed run() lifecycle.
 
 function taskError(error) {
   return {
@@ -26,6 +28,14 @@ function stableEffectId(prefix, key) {
   if (!stableKey) fail("INVALID_EFFECT_KEY", "stableEffectId() requires a canonical key");
   const digest = createHash("sha256").update(stableKey).digest("hex").slice(0, 24);
   return `${safePrefix}:${digest}`;
+}
+
+function stableRequirementId(prefix, key) {
+  const visible = String(key ?? "")
+    .replace(/[^A-Za-z0-9._:-]/gu, "_")
+    .slice(0, 64) || "value";
+  const digest = createHash("sha256").update(String(key ?? "")).digest("hex").slice(0, 8);
+  return `${prefix}:${visible}:${digest}`;
 }
 
 export function pageExpression(pageFunction, input) {
@@ -62,6 +72,136 @@ export function recordGroupOrderRequirement(records, expectedPageKeys, key = "pa
     expected: expected.join("\n"),
     actual: actual.join("\n"),
   };
+}
+
+function acceptanceInput(value, pages, maxRecordsPerPage) {
+  if (value === undefined) {
+    return { recordCount: null, recordsByPage: [], pageIds: [], requiredFields: [] };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail("INVALID_TASK_ARGS", "args.acceptance must be an object");
+  }
+  const allowed = new Set(["recordCount", "recordsByPage", "pageIds", "requiredFields"]);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    fail("INVALID_TASK_ARGS", `args.acceptance has unknown keys: ${unknown.join(", ")}`);
+  }
+  const pageKeys = new Set(pages.map((page) => page.id));
+  let recordCount = null;
+  if (Object.hasOwn(value, "recordCount")) {
+    if (!Number.isInteger(value.recordCount)
+      || value.recordCount < pages.length
+      || value.recordCount > pages.length * maxRecordsPerPage) {
+      fail(
+        "INVALID_TASK_ARGS",
+        "args.acceptance.recordCount must fit the bounded per-page record range",
+      );
+    }
+    recordCount = value.recordCount;
+  }
+  const recordsByPage = [];
+  if (Object.hasOwn(value, "recordsByPage")) {
+    if (!value.recordsByPage || typeof value.recordsByPage !== "object"
+      || Array.isArray(value.recordsByPage)) {
+      fail("INVALID_TASK_ARGS", "args.acceptance.recordsByPage must be an object");
+    }
+    for (const [pageKey, expected] of Object.entries(value.recordsByPage)) {
+      if (!pageKeys.has(pageKey) || !Number.isInteger(expected)
+        || expected < 1 || expected > maxRecordsPerPage) {
+        fail(
+          "INVALID_TASK_ARGS",
+          "args.acceptance.recordsByPage needs known page keys and bounded positive counts",
+        );
+      }
+      recordsByPage.push({ pageKey, expected });
+    }
+  }
+  const pageIds = [];
+  if (Object.hasOwn(value, "pageIds")) {
+    if (!value.pageIds || typeof value.pageIds !== "object" || Array.isArray(value.pageIds)) {
+      fail("INVALID_TASK_ARGS", "args.acceptance.pageIds must be an object");
+    }
+    for (const [pageKey, expected] of Object.entries(value.pageIds)) {
+      if (!pageKeys.has(pageKey) || typeof expected !== "string"
+        || expected.length < 1 || expected.length > 4_096) {
+        fail(
+          "INVALID_TASK_ARGS",
+          "args.acceptance.pageIds needs known page keys and non-empty string values",
+        );
+      }
+      pageIds.push({ pageKey, expected });
+    }
+  }
+  let requiredFields = [];
+  if (Object.hasOwn(value, "requiredFields")) {
+    if (!Array.isArray(value.requiredFields)
+      || value.requiredFields.length < 1 || value.requiredFields.length > 32) {
+      fail("INVALID_TASK_ARGS", "args.acceptance.requiredFields must contain 1-32 field names");
+    }
+    requiredFields = value.requiredFields.map((field) => {
+      if (typeof field !== "string" || field.length < 1 || field.length > 128
+        || /[\u0000-\u001f\u007f]/u.test(field)) {
+        fail("INVALID_TASK_ARGS", "args.acceptance.requiredFields contains an invalid field name");
+      }
+      return field;
+    });
+    if (new Set(requiredFields).size !== requiredFields.length) {
+      fail("INVALID_TASK_ARGS", "args.acceptance.requiredFields must be unique");
+    }
+  }
+  return { recordCount, recordsByPage, pageIds, requiredFields };
+}
+
+function acceptanceRequirements(plan, records, completedPageIds) {
+  const requirements = [{
+    id: "requested-pages",
+    satisfied: completedPageIds.length === plan.pages.length,
+    expected: plan.pages.length,
+    actual: completedPageIds.length,
+  }, {
+    id: "requested-page-identifiers",
+    satisfied: completedPageIds.every((id, index) => id === plan.pages[index].id),
+    expected: plan.pages.map((page) => page.id).join("\n"),
+    actual: completedPageIds.join("\n"),
+  }, recordGroupOrderRequirement(records, plan.pages.map((page) => page.id))];
+  if (plan.acceptance.recordCount !== null) {
+    requirements.push({
+      id: "requested-record-count",
+      satisfied: records.length === plan.acceptance.recordCount,
+      expected: plan.acceptance.recordCount,
+      actual: records.length,
+    });
+  }
+  for (const { pageKey, expected } of plan.acceptance.recordsByPage) {
+    const actual = records.filter((record) => record.pageKey === pageKey).length;
+    requirements.push({
+      id: stableRequirementId("page-record-count", pageKey),
+      satisfied: actual === expected,
+      expected,
+      actual,
+    });
+  }
+  for (const { pageKey, expected } of plan.acceptance.pageIds) {
+    const actualValues = [...new Set(records
+      .filter((record) => record.pageKey === pageKey)
+      .map((record) => record.pageId))];
+    requirements.push({
+      id: stableRequirementId("page-id", pageKey),
+      satisfied: actualValues.length === 1 && actualValues[0] === expected,
+      expected,
+      actual: actualValues.join("\n"),
+    });
+  }
+  for (const field of plan.acceptance.requiredFields) {
+    const actual = records.filter((record) => Object.hasOwn(record, field)).length;
+    requirements.push({
+      id: stableRequirementId("required-field", field),
+      satisfied: actual === records.length,
+      expected: records.length,
+      actual,
+    });
+  }
+  return requirements;
 }
 
 function inputs(args) {
@@ -110,7 +250,16 @@ function inputs(args) {
     && args.maxRecordsPerPage >= 1 && args.maxRecordsPerPage <= 1_000
     ? args.maxRecordsPerPage
     : 100;
-  return { pages, outputPath, manifestPath, checkpointPath, maxTextChars, maxRecordsPerPage };
+  const acceptance = acceptanceInput(args.acceptance, pages, maxRecordsPerPage);
+  return {
+    pages,
+    outputPath,
+    manifestPath,
+    checkpointPath,
+    maxTextChars,
+    maxRecordsPerPage,
+    acceptance,
+  };
 }
 
 async function collectPage({ moneyhand, task, signal, page, maxTextChars, maxRecordsPerPage }) {
@@ -219,17 +368,7 @@ async function executeTask({ moneyhand, task, signal, args, progress }) {
   return {
     outcome: {
       status: "complete",
-      requirements: [{
-        id: "requested-pages",
-        satisfied: completedPageIds.length === plan.pages.length,
-        expected: plan.pages.length,
-        actual: completedPageIds.length,
-      }, {
-        id: "requested-page-identifiers",
-        satisfied: completedPageIds.every((id, index) => id === plan.pages[index].id),
-        expected: plan.pages.map((page) => page.id).join("\n"),
-        actual: completedPageIds.join("\n"),
-      }, recordGroupOrderRequirement(records, plan.pages.map((page) => page.id))],
+      requirements: acceptanceRequirements(plan, records, completedPageIds),
       evidence: [
         { type: "output-file", path: plan.outputPath, format: "jsonl", count: records.length },
         { type: "output-manifest", path: plan.manifestPath },

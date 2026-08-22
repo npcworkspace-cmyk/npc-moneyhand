@@ -90,7 +90,7 @@ Promise.resolve()
     if (taskController.signal.aborted) throw taskController.signal.reason;
     if (workerData.unchangedTaskTemplate === true) {
       const error = new Error(
-        "The packaged task template or an unchanged copy cannot run; copy it to a task-owned path, replace only executeTask() with the concrete user task, and preserve run() before submitting",
+        "An unchanged blank asset template cannot run; copy it to a task-owned path, replace only executeTask() with the concrete user task, and preserve run() before submitting",
       );
       error.code = "TASK_TEMPLATE_NOT_IMPLEMENTED";
       error.details = { actionDispatched: false, retry: "implement-task-before-submitting" };

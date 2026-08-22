@@ -54,6 +54,7 @@ test("complete authoring example collects bounded pages, persists bulk data and 
           pageTitle: `Title ${currentPage.id}`,
           index,
           text: `Body ${currentPage.id} ${index}`,
+          literalTemplateTextIsSafe: "literal-${POST_ID}",
         })),
       };
     },
@@ -70,7 +71,27 @@ test("complete authoring example collects bounded pages, persists bulk data and 
   const result = await module.run({
     moneyhand,
     signal: AbortSignal.timeout(5_000),
-    args: { pages, outputPath, manifestPath, checkpointPath },
+    args: {
+      pages,
+      outputPath,
+      manifestPath,
+      checkpointPath,
+      acceptance: {
+        recordCount: 6,
+        recordsByPage: { first: 2, "literal-${POST_ID}": 1, third: 3 },
+        pageIds: { "literal-${POST_ID}": "literal-${POST_ID}" },
+        requiredFields: [
+          "id",
+          "pageKey",
+          "pageId",
+          "url",
+          "pageTitle",
+          "index",
+          "text",
+          "literalTemplateTextIsSafe",
+        ],
+      },
+    },
     taskExecutionId: "task-example",
     async progress(event) {
       progress.push(event);
@@ -83,7 +104,7 @@ test("complete authoring example collects bounded pages, persists bulk data and 
   assert.equal(result.output.checkpointPath, checkpointPath);
   assert.equal(result.output.count, 6);
   assert.equal(Object.hasOwn(result, "records"), false);
-  assert.deepEqual(result.outcome.requirements, [
+  assert.deepEqual(result.outcome.requirements.slice(0, 3), [
     { id: "requested-pages", satisfied: true, expected: 3, actual: 3 },
     {
       id: "requested-page-identifiers",
@@ -98,6 +119,27 @@ test("complete authoring example collects bounded pages, persists bulk data and 
       actual: pages.map((page) => page.id).join("\n"),
     },
   ]);
+  assert.equal(result.outcome.requirements.length, 16);
+  assert.equal(result.outcome.requirements.every((requirement) => requirement.satisfied), true);
+  assert.equal(
+    result.outcome.requirements.some((requirement) => (
+      requirement.id.startsWith("page-record-count:first:")
+    )),
+    true,
+  );
+  assert.equal(
+    result.outcome.requirements.some((requirement) => (
+      requirement.id.startsWith("required-field:literalTemplateTextIsSafe:")
+    )),
+    true,
+  );
+  assert.deepEqual(result.outcome.requirements[3], {
+    id: "requested-record-count",
+    satisfied: true,
+    expected: 6,
+    actual: 6,
+  });
+  assert.equal(new Set(result.outcome.requirements.map((requirement) => requirement.id)).size, 16);
   assert.equal(result.outcome.evidence.length, 2);
   assert.equal(progress.length, 4);
   assert.deepEqual(progress.slice(1).map((entry) => entry.current), [1, 2, 3]);

@@ -120,6 +120,14 @@ export const MAX_JSONL_INFLIGHT = 256;
 export const MONEYHAND_CONNECT_RESULT_SCHEMA = "npc-moneyhand-connect/1";
 const CONNECT_ACCEPTANCE_TASK_PATH = resolve(dirname(SOURCE_PATH), "..", "assets", "connect-acceptance.mjs");
 const CONNECT_READY_NEXT_ACTION = "ready_for_tasks";
+const CONNECT_TASK_ROUTING = Object.freeze({
+  currentConversationHasTask: "continue_immediately_without_reconfirmation",
+  noConcreteTask: "ask_user_for_task",
+  stopAfterConnectWhenTaskExists: "invalid",
+  blankTaskAssets: "copy_and_implement_never_run_source_identical_blank_asset",
+  runnableReference: "copy_source_identical_when_generic_selectors_fit",
+  acceptance: "explicit_user_or_authoritative_task_input_only_never_infer_unknown_values",
+});
 const CONNECT_ACCEPTANCE_TIMEOUT_MS = 90_000;
 export {
   AdaptiveRateController,
@@ -2270,12 +2278,7 @@ export class MoneyHand extends EventEmitter {
         command: "--connect",
         resultSchema: MONEYHAND_CONNECT_RESULT_SCHEMA,
         successNextAction: CONNECT_READY_NEXT_ACTION,
-        successTaskRouting: {
-          currentConversationHasTask: "continue_immediately_without_reconfirmation",
-          noConcreteTask: "ask_user_for_task",
-          stopAfterConnectWhenTaskExists: "invalid",
-          taskModule: "copy_and_implement_never_run_packaged_template",
-        },
+        successTaskRouting: { ...CONNECT_TASK_ROUTING },
         userRetryFlag: "--after-user-action",
         maximumUserConfirmedRetries: 1,
         runsBrowserOperation: true,
@@ -2376,8 +2379,14 @@ export class MoneyHand extends EventEmitter {
             template: "assets/disposable-task.mjs",
             onlyEditableFunction: "executeTask",
             fixedLifecycleMustBePreserved: true,
-            unchangedTemplateDetection: "normalized-source-fingerprint",
+            unchangedTemplateDetection: "normalized-source-fingerprint-for-blank-assets",
             manualSentinelRemovalRequired: false,
+            runnableCompleteExampleAllowed: true,
+            completeExampleAcceptanceArgs: [
+              "recordCount", "recordsByPage", "pageIds", "requiredFields",
+            ],
+            acceptanceAssertionSource: "explicit-user-or-authoritative-task-input-only",
+            unknownAcceptanceValues: "omit-never-guess",
             taskArgsInput: "absolute-utf8-json-file-via---args-file",
             executeTaskReturn: "{outcome,output?}",
             bulkOutput: "user-authorized-file-plus-small-manifest",
@@ -2713,8 +2722,14 @@ export class MoneyHand extends EventEmitter {
           template: "assets/disposable-task.mjs",
           onlyEditableFunction: "executeTask",
           fixedLifecycleMustBePreserved: true,
-          unchangedTemplateDetection: "normalized-source-fingerprint",
+          unchangedTemplateDetection: "normalized-source-fingerprint-for-blank-assets",
           manualSentinelRemovalRequired: false,
+          runnableCompleteExampleAllowed: true,
+          completeExampleAcceptanceArgs: [
+            "recordCount", "recordsByPage", "pageIds", "requiredFields",
+          ],
+          acceptanceAssertionSource: "explicit-user-or-authoritative-task-input-only",
+          unknownAcceptanceValues: "omit-never-guess",
           taskArgsInput: "absolute-utf8-json-file-via---args-file",
           executeTaskReturn: "{outcome,output?}",
           terminalValueField: "value",
@@ -8091,6 +8106,8 @@ function numericEnvironment(name, fallback) {
 function connectResult(value) {
   return {
     schema: MONEYHAND_CONNECT_RESULT_SCHEMA,
+    product: CONTROLLER_SERVICE_PRODUCT,
+    version: CONTROLLER_SERVICE_VERSION,
     connected: value.status === "connected",
     ...value,
   };
@@ -8250,16 +8267,11 @@ function acceptedConnectResult(acceptance) {
   return connectResult({
     status: "connected",
     nextAction: CONNECT_READY_NEXT_ACTION,
-    taskRouting: {
-      currentConversationHasTask: "continue_immediately_without_reconfirmation",
-      noConcreteTask: "ask_user_for_task",
-      stopAfterConnectWhenTaskExists: "invalid",
-      taskModule: "copy_and_implement_never_run_packaged_template",
-    },
+    taskRouting: { ...CONNECT_TASK_ROUTING },
     acceptance,
     userMessage: acceptance.status === "passed"
-      ? `MoneyHand 已连接，自动全功能验收 ${acceptance.passed}/${acceptance.total} 通过；测试窗口已关闭，行为已重置为 raw。若当前对话已经给出具体浏览器任务，必须立即继续执行且不能在此结束：先复制并实现临时任务模块，禁止原样运行资产模板；只有尚未给出任务时才询问用户。`
-      : "MoneyHand 已在隔离测试端口连接，当前测试未运行浏览器验收；若当前对话已有具体任务，必须立即继续执行：先复制并实现临时任务模块，禁止原样运行资产模板。",
+      ? `MoneyHand ${CONTROLLER_SERVICE_VERSION} 已连接，自动全功能验收 ${acceptance.passed}/${acceptance.total} 通过；测试窗口已关闭，行为已重置为 raw。若当前对话已经给出具体浏览器任务，必须立即继续执行且不能在此结束：空白资产模板必须实现；完整参考符合页面时可以原样复制；验收只声明用户或权威任务输入明确给出的值，未知值不得猜测。只有尚未给出任务时才询问用户。`
+      : `MoneyHand ${CONTROLLER_SERVICE_VERSION} 已在隔离测试端口连接，当前测试未运行浏览器验收；若当前对话已有具体任务，必须立即继续执行：空白资产模板必须实现；完整参考符合页面时可以原样复制；未知验收值不得猜测。`,
   });
 }
 
@@ -9087,7 +9099,6 @@ function taskWorkerError(value, fallbackCode = "MONEYHAND_TASK_FAILED") {
 const TASK_AUTHORING_TEMPLATE_DIGESTS = new Set([
   new URL("../assets/disposable-task.mjs", import.meta.url),
   new URL("../assets/specialized-task.mjs", import.meta.url),
-  new URL("../references/bounded-file-task.example.mjs", import.meta.url),
 ].map((url) => createHash("sha256")
   .update(readFileSync(url, "utf8").replace(/\r\n?/gu, "\n"))
   .digest("hex")));
