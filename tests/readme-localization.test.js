@@ -16,13 +16,15 @@ test("Chinese and English product pages link to each other", async () => {
   await Promise.all([access(CHINESE_README), access(ENGLISH_README)]);
 });
 
-test("both product pages make the Git workflow discoverable", async () => {
+test("both product pages keep concise onboarding and composition links discoverable", async () => {
   const pages = await Promise.all([
     readFile(CHINESE_README, "utf8"),
     readFile(ENGLISH_README, "utf8"),
   ]);
   for (const page of pages) {
-    assert.match(page, /\.\/docs\/GIT_WORKFLOW\.md/u);
+    assert.match(page, /\.\/docs\/AGENT_QUICKSTART\.md/u);
+    assert.match(page, /\.\/ARCHITECTURE\.md/u);
+    assert.match(page, /\.\/skills\/npc-moneyhand\/references\/skill-composition\.md/u);
   }
 });
 
@@ -40,51 +42,57 @@ test("every local product-page link resolves inside the repository", async () =>
   }
 });
 
-test("English product page preserves the positioning, three layers, and token thesis", async () => {
+test("English product page preserves the concise positioning and scenario capabilities", async () => {
   const english = await readFile(ENGLISH_README, "utf8");
 
   for (const statement of [
-    "The universal browser action companion for the Agent era",
-    "Why install MoneyHand?",
-    "The three-layer architecture",
-    "Layer 1: the Extension is the stable hand",
-    "Layer 2: the MoneyHand Skill is the reusable action system",
-    "Layer 3: a Custom Skill becomes your batch action assistant",
-    "Token efficiency by architecture",
-    "General browser capabilities",
-    "Build your own Custom Skill",
-    "Product boundaries",
+    "The browser action and task runtime for the Agent era",
+    "Multi-Agent task isolation",
+    "Complete task management",
+    "Long-running and unattended work",
+    "Batch execution and Token efficiency",
+    "Visual fallback and recovery",
+    "Adaptive rate control and verified completion",
+    "Complete page interaction",
+    "Three layers",
+    "Fixed rule for a new Agent",
   ]) {
-    assert.ok(english.includes(statement), `missing English positioning statement: ${statement}`);
+    assert.ok(
+      english.includes(statement),
+      "missing English positioning statement: " + statement,
+    );
   }
 
   for (const keyword of [
-    "AI agent browser automation",
+    "AI Agent Browser Automation",
+    "Multi-Agent Browser Control",
     "Chrome Extension",
-    "Chrome DevTools Protocol (CDP)",
-    "browser agents",
-    "web automation",
-    "computer-use",
-    "Custom Skill",
-    "local-first",
+    "CDP",
+    "Web Automation",
+    "Computer Use",
+    "Agent Skill",
+    "Local-first",
   ]) {
-    assert.ok(english.includes(keyword), `missing English discovery keyword: ${keyword}`);
+    assert.ok(
+      english.includes(keyword),
+      "missing English discovery keyword: " + keyword,
+    );
   }
 });
 
-test("Chinese and English product pages describe the same dedicated task-window lifecycle", async () => {
+test("Chinese and English product pages describe the same isolated task runtime", async () => {
   const [chinese, english] = await Promise.all([
     readFile(CHINESE_README, "utf8"),
     readFile(ENGLISH_README, "utf8"),
   ]);
-  assert.match(chinese, /最近焦点选择一次 Profile[\s\S]*新建、验证并固定一个专属任务窗口/u);
-  assert.match(english, /uses recent focus once to choose a Profile[\s\S]*dedicated task window/u);
-  assert.match(chinese, /只用于观察的整页截图/u);
-  assert.match(english, /observation-only full-page screenshots/u);
-  assert.match(chinese, /`about:blank` fragment[\s\S]*不会为了标记身份请求外部网站/u);
-  assert.match(english, /`about:blank` fragments[\s\S]*never requests an external website/u);
-  assert.match(chinese, /常驻但不混版[\s\S]*PID、进程 nonce/u);
-  assert.match(english, /Stay resident without mixing builds[\s\S]*PID[\s\S]*process nonce/u);
+  assert.match(chinese, /多个 Agent[\s\S]*独立窗口、Task Space、执行 ID、进度和检查点/u);
+  assert.match(english, /Multiple Agents[\s\S]*own window, Task Space, execution ID, progress, and checkpoints/u);
+  assert.match(chinese, /创建任务 → 固定窗口 → 执行动作 → 返回进度[\s\S]*验证结果 → 自动清理/u);
+  assert.match(english, /create → pin window → execute → report progress[\s\S]*verify result → clean up/u);
+  assert.match(chinese, /Agent 暂时断开[\s\S]*继续跟进同一个任务/u);
+  assert.match(english, /originating Agent disconnects[\s\S]*continue following the same task/u);
+  assert.match(chinese, /超时、遮挡、页面变化、操作无反馈或任务静默/u);
+  assert.match(english, /times out[\s\S]*occluded[\s\S]*task goes silent/u);
 });
 
 test("public product pages do not use private application examples", async () => {
