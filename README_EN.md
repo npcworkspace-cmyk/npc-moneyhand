@@ -12,7 +12,9 @@
 
 It is not a site-specific crawler or another disposable automation script. MoneyHand combines browser interaction, task isolation, progress management, recovery, and Skill composition into one reusable foundation.
 
-[Download the base Skill](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-portable-skill.zip) · [Download the Extension](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-extension.zip) · [Quickstart](./docs/AGENT_QUICKSTART.md) · [MIT License](./LICENSE)
+> **For first-time installation, download only these two files:** [`npc-moneyhand-portable-skill.zip`](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-portable-skill.zip) (base Skill) and [`npc-moneyhand-extension.zip`](https://github.com/npcworkspace-cmyk/npc-moneyhand/releases/latest/download/npc-moneyhand-extension.zip) (browser Extension). All other Release assets are for development, auditing, or integrity verification.
+
+[Quickstart](./docs/AGENT_QUICKSTART.md) · [MIT License](./LICENSE)
 
 ## What can it do?
 

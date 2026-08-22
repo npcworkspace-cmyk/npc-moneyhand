@@ -28,6 +28,20 @@ test("both product pages keep concise onboarding and composition links discovera
   }
 });
 
+test("both product pages tell first-time Agents to download only the two install assets", async () => {
+  const [chinese, english] = await Promise.all([
+    readFile(CHINESE_README, "utf8"),
+    readFile(ENGLISH_README, "utf8"),
+  ]);
+  assert.match(chinese, /首次安装只下载以下两个文件/u);
+  assert.match(english, /For first-time installation, download only these two files/u);
+  for (const page of [chinese, english]) {
+    assert.match(page, /npc-moneyhand-portable-skill\.zip/u);
+    assert.match(page, /npc-moneyhand-extension\.zip/u);
+    assert.match(page, /releases\/latest\/download/u);
+  }
+});
+
 test("every local product-page link resolves inside the repository", async () => {
   const pages = await Promise.all([
     readFile(CHINESE_README, "utf8"),
