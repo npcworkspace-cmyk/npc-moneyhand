@@ -8,8 +8,8 @@
     ".": "./skills/npc-moneyhand/scripts/moneyhand.mjs"
   },
   "scripts": {
-    "test": "node --test",
-    "check": "node scripts/check.mjs && node scripts/audit-product-boundaries.mjs && node --test",
+    "test": "node --test --test-concurrency=1",
+    "check": "node scripts/check.mjs && node scripts/audit-product-boundaries.mjs && node --test --test-concurrency=1",
     "audit:boundaries": "node scripts/audit-product-boundaries.mjs",
     "accept:agents:packaged": "node scripts/packaged-agent-conformance.mjs",
     "release:pack": "node scripts/build-agent-release.mjs",

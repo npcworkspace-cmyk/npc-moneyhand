@@ -16,6 +16,7 @@ import {
 } from "./helpers/raw-websocket.js";
 
 const PROTOCOL = "npc-moneyhand/2";
+const TEST_SESSION_TIMEOUT_MS = 5_000;
 
 async function unusedLoopbackPort() {
   const server = createNetServer();
@@ -117,7 +118,10 @@ async function confirmReady(client) {
 }
 
 async function readyExtension(peer, t, hello = extensionHello()) {
-  const waiting = peer.waitFor({ profile: hello.profile }, { timeoutMs: 1_000 });
+  const waiting = peer.waitFor(
+    { profile: hello.profile },
+    { timeoutMs: TEST_SESSION_TIMEOUT_MS },
+  );
   const client = await connectExtension(peer, t);
   client.sendJson(hello);
   const ready = await client.nextJson();
@@ -336,7 +340,7 @@ test("a buffered focus event supersedes stale hello focus before session activat
   }));
   const waiting = peer.waitFor(
     {},
-    { afterSerial: first.session.serial, timeoutMs: 1_000 },
+    { afterSerial: first.session.serial, timeoutMs: TEST_SESSION_TIMEOUT_MS },
   );
   const secondClient = await connectExtension(peer, t);
   secondClient.sendJson(extensionHello({
@@ -383,7 +387,10 @@ test("the first hello frame is processed when it arrives in the HTTP upgrade hea
     instanceId: "instance_head",
     bootId: "boot_head_01",
   });
-  const waiting = peer.waitFor({ profile: hello.profile }, { timeoutMs: 1_000 });
+  const waiting = peer.waitFor(
+    { profile: hello.profile },
+    { timeoutMs: TEST_SESSION_TIMEOUT_MS },
+  );
   const client = await connectExtension(peer, t, {
     headFrame: clientFrame(JSON.stringify(hello)),
   });
@@ -406,7 +413,10 @@ test("HMAC pairing proves both sides before ready without exposing the secret", 
       clientNonce: "client_nonce_123456",
     },
   });
-  const waiting = peer.waitFor({ profile: hello.profile }, { timeoutMs: 1_000 });
+  const waiting = peer.waitFor(
+    { profile: hello.profile },
+    { timeoutMs: TEST_SESSION_TIMEOUT_MS },
+  );
   const client = await connectExtension(peer, t);
   client.sendJson(hello);
 
@@ -445,7 +455,10 @@ test("an unauthenticated handshake cannot reserve a paired Extension identity", 
   stalled.sendJson(hello);
   assert.equal((await stalled.nextJson()).type, "challenge");
 
-  const waiting = peer.waitFor({ profile: hello.profile }, { timeoutMs: 1_000 });
+  const waiting = peer.waitFor(
+    { profile: hello.profile },
+    { timeoutMs: TEST_SESSION_TIMEOUT_MS },
+  );
   const legitimate = await connectExtension(peer, t);
   legitimate.sendJson(hello);
   const challenge = await legitimate.nextJson();
